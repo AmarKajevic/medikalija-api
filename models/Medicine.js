@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 const medicineSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
-    pricePerUnit: { type: Number, required: true },
+    pricePerUnit: { type: Number},
 
     // 👇 ukupna količina tableta u domu (Medikalija)
     quantity: { type: Number, required: true, default: 0 },
