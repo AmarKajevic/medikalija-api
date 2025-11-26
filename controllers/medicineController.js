@@ -46,10 +46,19 @@ const addMedicine = async (req, res) => {
       quantity,
     } = req.body;
 
-    if (!name || pricePerUnit == null) {
+    // Naziv uvek mora da postoji
+    if (!name) {
       return res.status(400).json({
         success: false,
-        message: "Naziv leka i cena su obavezni.",
+        message: "Naziv leka je obavezan.",
+      });
+    }
+
+    // Cena je obavezna SAMO ako lek dodaje DOM (NE porodica)
+    if (!fromFamily && pricePerUnit == null) {
+      return res.status(400).json({
+        success: false,
+        message: "Cena je obavezna za lekove koje dodaje dom.",
       });
     }
 
