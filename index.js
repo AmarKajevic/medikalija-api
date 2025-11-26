@@ -17,11 +17,11 @@ import nurseActionRouter from "./routes/nurseActionsRoutes.js"
 import calendarRoutes from "./routes/calendarRoutes.js";
 import notificationRoutes from "./routes/notification.js";
 import cookieParser from "cookie-parser";
-import { startCronJobs } from "./cron/index.js";
+
 
 dotenv.config() // Obavezno da se .env fajl učita
 connectToDatabase()
-startCronJobs();
+//startCronJobs();
 
 const app = express();
 
