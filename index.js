@@ -29,7 +29,7 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(
   cors({
-    origin: "https://medikalija-frontend.vercel.app/", // 👈 tvoj frontend
+    origin: "https://medikalija-frontend.vercel.app", // 👈 tvoj frontend
     credentials: true, // dozvoli slanje cookie-a
   })
 );
