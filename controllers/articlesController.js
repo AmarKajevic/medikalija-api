@@ -31,8 +31,23 @@ const addArticle = async (req, res) => {
       quantity,
     } = req.body;
 
-    if (!name || price == null) {
-      return res.status(400).json({ success: false, message: "Naziv i cena su obavezni." });
+    // if (!name || price == null) {
+    //   return res.status(400).json({ success: false, message: "Naziv i cena su obavezni." });
+    // }
+    // Naziv uvek mora da postoji
+    if (!name) {
+      return res.status(400).json({
+        success: false,
+        message: "Naziv artikla je obavezan.",
+      });
+    }
+
+    // Cena je obavezna SAMO ako lek dodaje DOM (NE porodica)
+    if (!fromFamily && pricePerUnit == null) {
+      return res.status(400).json({
+        success: false,
+        message: "Cena je obavezna za lekove koje dodaje dom.",
+      });
     }
 
     let totalUnitsAdded = 0;
