@@ -27,53 +27,114 @@ const getSpecification = async (req, res) => {
 const addCostsToSpecification = async (req, res) => {
   try {
     const { id } = req.params;
-    const { lodgingPrice, extraCostAmount, extraCostLabel } = req.body;
+    const { extraCostAmount, extraCostLabel } = req.body;
 
     const spec = await Specification.findById(id);
     if (!spec) {
-      return res.status(404).json({ success: false, message: "Specifikacija nije pronađena." });
+      return res
+        .status(404)
+        .json({ success: false, message: "Specifikacija nije pronađena." });
     }
 
     let totalAdd = 0;
 
-    // ✅ Cena smeštaja
-    if (lodgingPrice && lodgingPrice > 0) {
-      spec.items.push({
-        name: "Cena smeštaja",
-        category: "lodging",
-        amount: 1,
-        price: lodgingPrice,
-        date: new Date()
-      });
-
-      totalAdd += lodgingPrice;
-    }
-
-    // ✅ Dodatni trošak
     if (extraCostAmount && extraCostAmount > 0) {
       spec.items.push({
         name: extraCostLabel || "Dodatni trošak",
         category: "extra",
         amount: 1,
         price: extraCostAmount,
-        date: new Date()
+        date: new Date(),
       });
 
       totalAdd += extraCostAmount;
+      spec.extraCosts = (spec.extraCosts || 0) + extraCostAmount;
     }
 
-    // ✅ Ažuriranje totalPrice
     spec.totalPrice += totalAdd;
 
     await spec.save();
 
     return res.json({ success: true, specification: spec });
-
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ success: false, message: err.message });
+    return res
+      .status(500)
+      .json({ success: false, message: err.message });
   }
 };
+// controllers/specificationController.js (nastavak)
+
+// ✅ SAČUVAJ KOMPLETAN OBRAČUN (specifikacija + dug + smeštaj za naredni period)
+const saveBillingForSpecification = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      previousDebtEUR,   // dug u evrima
+      nextLodgingEUR,    // smeštaj za naredni period u evrima
+      lowerExchangeRate, // niži kurs
+      middleExchangeRate // srednji kurs
+    } = req.body;
+
+    const spec = await Specification.findById(id);
+    if (!spec) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Specifikacija nije pronađena." });
+    }
+
+    const specTotalRSD = spec.totalPrice ?? 0;
+
+    const low = Number(lowerExchangeRate) || 0;
+    const mid = Number(middleExchangeRate) || 0;
+    const debtEUR = Number(previousDebtEUR) || 0;
+    const lodgingEUR = Number(nextLodgingEUR) || 0;
+
+    // ✅ SPECIFIKACIJA po NIŽEM kursu
+    const specEUR = low > 0 ? specTotalRSD / low : 0;
+
+    // ✅ DUG po NIŽEM kursu (tvoja izmena)
+    const debtRSD = low > 0 ? debtEUR * low : 0;
+
+    // ✅ SMEŠTAJ za naredni period po SREDNJEM kursu
+    const lodgingRSD = mid > 0 ? lodgingEUR * mid : 0;
+
+    const totalRSD = specTotalRSD + debtRSD + lodgingRSD;
+    const totalEUR = specEUR + debtEUR + lodgingEUR;
+
+    // izračunaj period smeštaja za naredni mesec (30 dana)
+    const currentEndDate = new Date(spec.endDate);
+    const nextStartDate = new Date(currentEndDate);
+    nextStartDate.setDate(nextStartDate.getDate() + 1);
+    const nextEndDate = new Date(nextStartDate);
+    nextEndDate.setDate(nextEndDate.getDate() + 29);
+
+    spec.billing = {
+      lowerExchangeRate: low,
+      middleExchangeRate: mid,
+      previousDebtEUR: debtEUR,
+      previousDebtRSD: debtRSD,
+      nextLodgingEUR: lodgingEUR,
+      nextLodgingRSD: lodgingRSD,
+      specEUR,
+      totalRSD,
+      totalEUR,
+      nextPeriodStart: nextStartDate,
+      nextPeriodEnd: nextEndDate,
+    };
+
+    await spec.save();
+
+    return res.json({ success: true, specification: spec });
+  } catch (err) {
+    console.error(err);
+    return res
+      .status(500)
+      .json({ success: false, message: err.message });
+  }
+};
+
+
 
 // 📌 VRATI istoriju + aktivnu specifikaciju
 const getSpecificationHistory = async (req, res) => {
@@ -132,4 +193,4 @@ const getSpecificationById = async (req, res) => {
 };
 
 
-export {getSpecification, getSpecificationHistory, getSpecificationById, addCostsToSpecification}
+export {getSpecification, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification}
