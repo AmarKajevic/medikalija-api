@@ -8,7 +8,7 @@ const generateAccessToken = (user) => {
   return jwt.sign(
     { _id: user._id, role: user.role },
     process.env.JWT_KEY,            // koristi JWT_KEY
-    { expiresIn: "1h" }             // access token traje 1h
+    { expiresIn: "4h" }             // access token traje 4h
   );
 };
 
@@ -122,7 +122,7 @@ const refresh = async (req, res) => {
     const newAccessToken = jwt.sign(
       { _id: user._id, role: user.role },
       process.env.JWT_KEY,
-      { expiresIn: "1h" } // access token važi 1h minuta
+      { expiresIn: "4h" } // access token važi 4h 
     );
 
     return res.status(200).json({
