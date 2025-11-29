@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 const articleSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
-    price: { type: Number, required: true },
+    price: { type: Number},
 
     // 👇 ukupna količina artikla u domu
     quantity: { type: Number, required: true, default: 0 },
