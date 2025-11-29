@@ -210,20 +210,20 @@ const addArticleToPatient = async (req, res) => {
 
     console.log("🟦 addArticleToPatient pozvan!", req.body);
 
-    // 1. PACIJENT
+    // 1) PACIJENT
     const patient = await Patient.findById(patientId);
     if (!patient) {
       return res.status(404).json({ success: false, message: "Pacijent nije pronađen" });
     }
 
-    // 2. ARTIKAL
+    // 2) ARTIKAL
     const article = await Article.findById(articleId);
     if (!article) {
       return res.status(404).json({ success: false, message: "Artikal nije pronađen" });
     }
 
     // =====================================================
-    // 🔵  A) SESTRA — NE SME da menja zalihe i NE ULAZI u specifikaciju
+    // 🔵  A) SESTRA — NE SME da menja zalihe i NE ulazi u specifikaciju
     // =====================================================
     if (req.user.role === "nurse") {
       console.log("➡️ Sestra dodaje artikal — NE diram stanje!");
@@ -237,14 +237,13 @@ const addArticleToPatient = async (req, res) => {
         roleUsed: req.user.role,
       });
 
-      // 🔔 Notifikacija vlasniku pacijenta
+      // Notifikacije (vlasnik + glavna sestra)
       await createNotification(
         patient.createdBy,
         "article",
         `${req.user.name} ${req.user.lastName} je dodala artikal pacijentu ${patient.name} ${patient.lastName}.`
       );
 
-      // 🔔 Notifikacija glavnoj sestri
       const headNurse = await User.findOne({ role: "head_nurse" });
       if (headNurse) {
         await createNotification(
@@ -262,7 +261,7 @@ const addArticleToPatient = async (req, res) => {
     }
 
     // =====================================================
-    // 🔴  B) ADMIN / VLASNIK — NORMALNO SKIDA SA ZALIHA + SPECIFIKACIJA
+    // 🔴  B) ADMIN / VLASNIK — SKIDA SA ZALIHA + SPECIFIKACIJA
     // =====================================================
 
     const totalAvailable = article.familyQuantity + article.quantity;
@@ -296,7 +295,7 @@ const addArticleToPatient = async (req, res) => {
 
     await article.save();
 
-    //Upis u UsedArticles
+    // Upis u UsedArticles
     const usedArticle = await UsedArticles.create({
       patient: patientId,
       article: articleId,
@@ -306,23 +305,41 @@ const addArticleToPatient = async (req, res) => {
       roleUsed: req.user.role,
     });
 
-    // SPECIFIKACIJA – samo deo iz magacina
+    // =====================================================
+    // 🟣 SPECIFIKACIJA — samo deo iz magacina
+    // =====================================================
     if (fromStock > 0) {
       const spec = await getOrCreateActiveSpecification(patientId);
 
       const cost = fromStock * article.price;
 
-      spec.items.push({
-        name: article.name,
-        category: "article",
-        amount: fromStock,
-        price: cost,
-        date: new Date(),
-      });
+      // -----------------------------------------------------
+      // 🔥 PROVERA DA LI VEĆ POSTOJI U SPECIFIKACIJI
+      // -----------------------------------------------------
+      const existingItem = spec.items.find(
+        (i) =>
+          i.category === "article" &&
+          i.name === article.name
+      );
 
+      if (existingItem) {
+        // 🔥 Update umesto dodavanja
+        existingItem.amount += fromStock;
+        existingItem.price += cost;
+      } else {
+        // ➕ Dodaj novi item
+        spec.items.push({
+          name: article.name,
+          category: "article",
+          amount: fromStock,
+          price: cost,
+          date: new Date(),
+        });
+      }
+
+      // Recalculate totalPrice
       spec.totalPrice =
         spec.items.reduce((sum, i) => sum + (i.price ?? 0), 0) +
-        (spec.lodgingPrice ?? 0) +
         (spec.extraCosts ?? 0);
 
       await spec.save();
@@ -335,6 +352,7 @@ const addArticleToPatient = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
+
 
 
 // 📄 Istorija potrošnje pacijenta
