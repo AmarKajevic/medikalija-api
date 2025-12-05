@@ -2,63 +2,79 @@ import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import Token from "../models/Token.js";
 import bcrypt from "bcrypt";
+import { ACTIVE_ROLES, PASSIVE_ROLES, ALL_ROLES } from "../models/User.js";
 
-// 🔑 Helperi za JWT
+// ------------------ JWT HELPERS ------------------
 const generateAccessToken = (user) => {
   return jwt.sign(
     { _id: user._id, role: user.role },
-    process.env.JWT_KEY,            // koristi JWT_KEY
-    { expiresIn: "4h" }             // access token traje 4h
+    process.env.JWT_KEY,
+    { expiresIn: "4h" }
   );
 };
 
 const generateRefreshToken = (user) => {
   return jwt.sign(
     { _id: user._id, role: user.role },
-    process.env.JWT_REFRESH_SECRET, // koristi refresh secret
-    { expiresIn: "7d" }             // refresh token traje 7 dana
+    process.env.JWT_REFRESH_SECRET,
+    { expiresIn: "7d" }
   );
 };
 
-// 📌 Registracija (samo vlasnik/admin može registrovati nove korisnike)
+// ------------------ REGISTER ------------------
+// Admin i main-nurse mogu kreirati korisnike
 const register = async (req, res) => {
   try {
-    const { name,lastName, email, password, role } = req.body;
+    const { name, lastName, email, password, role } = req.body;
 
-    const existingUser = await User.findOne({ name, lastName });
-    if (existingUser) {
+    if (!ALL_ROLES.includes(role)) {
+      return res.status(400).json({ success: false, message: "Nepostojeća rola" });
+    }
+
+    const existing = await User.findOne({ email });
+    if (existing) {
       return res.status(400).json({ success: false, message: "Email već postoji" });
     }
 
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash(password, salt);
+    const passwordHash = await bcrypt.hash(password, 10);
 
-    const user = await User.create({ name, lastName, email, passwordHash, role });
+    const user = await User.create({
+      name,
+      lastName,
+      email,
+      passwordHash,
+      role,
+      loginAllowed: ACTIVE_ROLES.includes(role),
+    });
 
-    res.status(201).json({ success: true, message: "Korisnik je kreiran", user });
+    res.status(201).json({
+      success: true,
+      message: "Korisnik kreiran",
+      user,
+    });
   } catch (err) {
-    return res.status(500).json({ success: false, error: err.message });
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 
-// 📌 Login
+// ------------------ LOGIN ------------------
 const login = async (req, res) => {
   try {
-    const { name, lastName, email, password } = req.body;
+    const { email, password } = req.body;
 
     const user = await User.findOne({
-      name: { $regex: new RegExp(`^${name}$`, "i") },
-      lastName: { $regex: new RegExp(`^${lastName}$`, "i") },
+      email: { $regex: new RegExp(`^${email}$`, "i") }
     });
 
-    if (!user) {
+    if (!user)
       return res.status(404).json({ success: false, error: "Korisnik nije pronađen" });
-    }
+
+    if (!user.loginAllowed)
+      return res.status(403).json({ success: false, error: "Ovoj ulozi nije dozvoljen login" });
 
     const isMatch = await bcrypt.compare(password, user.passwordHash);
-    if (!isMatch) {
+    if (!isMatch)
       return res.status(400).json({ success: false, error: "Neispravna lozinka" });
-    }
 
     const accessToken = generateAccessToken(user);
     const refreshToken = generateRefreshToken(user);
@@ -66,92 +82,102 @@ const login = async (req, res) => {
     await Token.create({
       user: user._id,
       token: refreshToken,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 dana
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
     });
 
     res.cookie("refreshToken", refreshToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      maxAge: 7 * 24 * 60 * 60 * 1000,
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
-    return res.status(200).json({
+    res.status(200).json({
       success: true,
       accessToken,
       refreshToken,
       user: {
         _id: user._id,
         name: user.name,
-        lastName: user.lastName, // Dodaj ako koristiš u frontendu
+        lastName: user.lastName,
         role: user.role,
         email: user.email,
-      },
+      }
     });
-  } catch (error) {
-    return res.status(500).json({ success: false, error: error.message });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 };
 
-// 📌 Refresh access token
+// ------------------ REFRESH TOKEN ------------------
 const refresh = async (req, res) => {
   try {
-    // 🔑 Uzimamo refresh token iz cookie-ja
-    const refreshToken = req.cookies.refreshToken;
-
-    if (!refreshToken) {
+    const refreshToken = req.cookies?.refreshToken;
+    if (!refreshToken)
       return res.status(400).json({ success: false, message: "Nedostaje refresh token" });
-    }
 
-    // Da li postoji u bazi?
     const stored = await Token.findOne({ token: refreshToken });
-    if (!stored) {
-      return res.status(403).json({ success: false, message: "Neispravan refresh token" });
-    }
+    if (!stored)
+      return res.status(403).json({ success: false, message: "Refresh token nije validan" });
 
-    // Validacija refresh tokena
     const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
-
-    // Da li postoji korisnik?
     const user = await User.findById(decoded._id).select("-passwordHash");
-    if (!user) {
+
+    if (!user)
       return res.status(404).json({ success: false, message: "Korisnik ne postoji" });
-    }
 
-    // Generiši novi access token
-    const newAccessToken = jwt.sign(
-      { _id: user._id, role: user.role },
-      process.env.JWT_KEY,
-      { expiresIn: "4h" } // access token važi 4h 
-    );
+    const newToken = generateAccessToken(user);
 
-    return res.status(200).json({
-      success: true,
-      accessToken: newAccessToken,
-      user,
-    });
-  } catch (error) {
-    return res.status(403).json({ success: false, message: "Neispravan ili istekao refresh token" });
+    res.status(200).json({ success: true, accessToken: newToken, user });
+  } catch (err) {
+    res.status(403).json({ success: false, message: "Neispravan ili istekao refresh token" });
   }
 };
 
-
-// 📌 Logout
+// ------------------ LOGOUT ------------------
 const logout = async (req, res) => {
-  const refreshToken = req.cookies.refreshToken;
-  if (refreshToken) {
-    await Token.findOneAndDelete({ token: refreshToken });
-    res.clearCookie("refreshToken", { httpOnly: true, sameSite: "strict", secure: process.env.NODE_ENV === "production" });
+  try {
+    const refreshToken = req.cookies?.refreshToken;
+    if (refreshToken) {
+      await Token.findOneAndDelete({ token: refreshToken });
+      res.clearCookie("refreshToken");
+    }
+    res.status(200).json({ success: true, message: "Logged out" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
-  res.status(200).json({ success: true, message: "Logged out" });
 };
 
-const verify = (req, res) => {
-  return res.status(200).json({success: true, user: req.user})
-}
-// 📌 Verify / current user (posle authMiddleware)
+// ------------------ LIST ALL USERS ------------------
+const listUsers = async (req, res) => {
+  try {
+    const users = await User.find().select("-passwordHash");
+    res.status(200).json({ success: true, users });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ------------------ DELETE USER ------------------
+const deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    await User.findByIdAndDelete(id);
+
+    res.status(200).json({ success: true, message: "Korisnik obrisan" });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+};
+
+// ------------------ CURRENT USER ------------------
 const getCurrentUser = (req, res) => {
   res.status(200).json({ success: true, user: req.user });
 };
 
-export { register, login, refresh, logout, getCurrentUser, verify };
+const verify = (req, res) => {
+  res.status(200).json({ success: true, user: req.user });
+};
+
+export { register, login, refresh, logout, listUsers, deleteUser, getCurrentUser, verify };
