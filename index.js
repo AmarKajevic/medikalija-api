@@ -18,28 +18,19 @@ import combinationGroupRouter from "./routes/combinationGroup.js"
 import nurseActionRouter from "./routes/nurseActionsRoutes.js"
 import calendarRoutes from "./routes/calendarRoutes.js"
 import notificationRoutes from "./routes/notification.js"
-import searchRouter from "./routes/search.js"
 
 dotenv.config()
 
 const app = express();
 
-// ✅ 1) CORS MORA BITI PRVI
+app.use(express.json());
+app.use(cookieParser());
 app.use(
   cors({
     origin: "https://medikalija-frontend.vercel.app",
     credentials: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-
-// ✅ 2) OVO JE KLJUČNO — preflight prolazi SIGURNO
-app.options("*", cors());
-
-// ⚠️ 3) TEK ONDA ostali middleware
-app.use(express.json());
-app.use(cookieParser());
 
 // ===== ROUTES =====
 app.use('/api/auth', authRouther)
@@ -56,16 +47,10 @@ app.use('/api/combinationGroup', combinationGroupRouter)
 app.use('/api/nurse-actions', nurseActionRouter)
 app.use('/api/calendar', calendarRoutes)
 app.use('/api/notifications', notificationRoutes)
-app.use("/api/search", searchRouter);
 
-// GLOBAL ERROR HANDLER (VAŽNO ZA CORS)
-app.use((err, req, res, next) => {
-  console.error("GLOBAL ERROR:", err);
-  res.status(500).json({ success: false, message: "Server error" });
-});
 
 async function startServer() {
-  await connectToDatabase();
+  await connectToDatabase();  // ⭐ OBAVEZNO PRE STARTA SERVERA
 
   app.listen(process.env.PORT || 5000, () =>
     console.log(`🚀 Server running on ${process.env.PORT}`)
