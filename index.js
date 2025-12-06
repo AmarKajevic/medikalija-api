@@ -18,6 +18,7 @@ import combinationGroupRouter from "./routes/combinationGroup.js"
 import nurseActionRouter from "./routes/nurseActionsRoutes.js"
 import calendarRoutes from "./routes/calendarRoutes.js"
 import notificationRoutes from "./routes/notification.js"
+import searchRouter from "./routes/search.js"
 
 dotenv.config()
 
@@ -47,7 +48,7 @@ app.use('/api/combinationGroup', combinationGroupRouter)
 app.use('/api/nurse-actions', nurseActionRouter)
 app.use('/api/calendar', calendarRoutes)
 app.use('/api/notifications', notificationRoutes)
-
+app.use("/api/search", searchRouter);
 
 async function startServer() {
   await connectToDatabase();  // ⭐ OBAVEZNO PRE STARTA SERVERA
