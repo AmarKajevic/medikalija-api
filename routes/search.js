@@ -1,12 +1,10 @@
 import express from "express";
 import Medicine from "../models/Medicine.js";
-import Articles from "../models/Articles.js";
+import Articles from "../models/Articles.js"; // ✔ ispravljeno ime modela
 import Patient from "../models/Patient.js";
-
 
 const router = express.Router();
 
-// /api/search?q=bruf
 router.get("/", async (req, res) => {
   try {
     const query = req.query.q?.trim();
@@ -17,27 +15,34 @@ router.get("/", async (req, res) => {
 
     const regex = new RegExp(query, "i");
 
-    // 🔍 Pretraga lekova
+    // 🟦 LEKOVI – sada vraća quantity i familyQuantity
     const medicines = await Medicine.find({ name: regex })
       .limit(10)
-      .select("_id name");
+      .select("_id name quantity familyQuantity");
 
-    // 🔍 Pretraga artikala
+    // 🟩 ARTIKLI
     const articles = await Articles.find({ name: regex })
       .limit(10)
       .select("_id name");
 
-    // 🔍 Pretraga pacijenata
+    // 🟧 PACIJENTI
     const patients = await Patient.find({
       $or: [{ name: regex }, { lastName: regex }],
     })
       .limit(10)
       .select("_id name lastName");
 
-    // Formatiramo sve rezultate u jedan niz
     const results = [
-      ...medicines.map((m) => ({ ...m.toObject(), type: "medicine" })),
-      ...articles.map((a) => ({ ...a.toObject(), type: "article" })),
+      ...medicines.map((m) => ({
+        ...m.toObject(),
+        type: "medicine",
+      })),
+
+      ...articles.map((a) => ({
+        ...a.toObject(),
+        type: "article",
+      })),
+
       ...patients.map((p) => ({
         _id: p._id,
         name: `${p.name} ${p.lastName}`,
@@ -45,9 +50,11 @@ router.get("/", async (req, res) => {
       })),
     ];
 
-    res.json({ success: true, results });
+    return res.json({ success: true, results });
+
   } catch (error) {
-    res.status(500).json({ success: false, message: "Search error", error: error.message });
+    console.log(error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
