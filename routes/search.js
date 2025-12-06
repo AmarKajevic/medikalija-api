@@ -23,7 +23,7 @@ router.get("/", async (req, res) => {
     // 🟩 ARTIKLI
     const articles = await Articles.find({ name: regex })
       .limit(10)
-      .select("_id name");
+      .select("_id name quantity familyQuantity");
 
     // 🟧 PACIJENTI
     const patients = await Patient.find({
