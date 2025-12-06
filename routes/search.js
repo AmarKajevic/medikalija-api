@@ -2,7 +2,7 @@ import express from "express";
 import Medicine from "../models/Medicine.js";
 import Article from "../models/Article.js";
 import Patient from "../models/Patient.js";
-import authMiddleware from "../middleware/authMiddleware.js";
+
 
 const router = express.Router();
 

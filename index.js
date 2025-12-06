@@ -24,8 +24,7 @@ dotenv.config()
 
 const app = express();
 
-app.use(express.json());
-app.use(cookieParser());
+// ✅ 1) CORS MORA BITI PRVI
 app.use(
   cors({
     origin: "https://medikalija-frontend.vercel.app",
@@ -35,7 +34,12 @@ app.use(
   })
 );
 
-app.options("*", cors()); // OVO JE KLJUČNO
+// ✅ 2) OVO JE KLJUČNO — preflight prolazi SIGURNO
+app.options("*", cors());
+
+// ⚠️ 3) TEK ONDA ostali middleware
+app.use(express.json());
+app.use(cookieParser());
 
 // ===== ROUTES =====
 app.use('/api/auth', authRouther)
@@ -54,8 +58,14 @@ app.use('/api/calendar', calendarRoutes)
 app.use('/api/notifications', notificationRoutes)
 app.use("/api/search", searchRouter);
 
+// GLOBAL ERROR HANDLER (VAŽNO ZA CORS)
+app.use((err, req, res, next) => {
+  console.error("GLOBAL ERROR:", err);
+  res.status(500).json({ success: false, message: "Server error" });
+});
+
 async function startServer() {
-  await connectToDatabase();  // ⭐ OBAVEZNO PRE STARTA SERVERA
+  await connectToDatabase();
 
   app.listen(process.env.PORT || 5000, () =>
     console.log(`🚀 Server running on ${process.env.PORT}`)
