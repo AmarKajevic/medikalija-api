@@ -7,7 +7,7 @@ import authMiddleware from "../middleware/authMiddleware.js";
 const router = express.Router();
 
 // /api/search?q=bruf
-router.get("/", authMiddleware, async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const query = req.query.q?.trim();
 
