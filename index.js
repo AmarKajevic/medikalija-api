@@ -28,10 +28,16 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(
   cors({
-    origin: "https://medikalija-frontend.vercel.app",
+    origin: ["https://medikalija-frontend.vercel.app"],
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
+// ✅ OBAVEZAN PRE-FLIGHT HANDLER
+app.options("*", cors());
+
 
 // ===== ROUTES =====
 app.use('/api/auth', authRouther)

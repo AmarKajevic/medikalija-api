@@ -537,6 +537,14 @@ const moveMedicineToReserve = async (req, res) => {
   }
 };
 
+const getReserveMedicines = async (req, res) => {
+  try {
+    const reserve = await MedicineReserve.find().sort({ createdAt: -1 });
+    return res.status(200).json({ success: true, reserve });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message });
+  }
+};
 
 export {
   addMedicine,
@@ -546,5 +554,6 @@ export {
   getPatientMedicine,
   updateMedicine,
   deleteMedicine,
-  moveMedicineToReserve
+  moveMedicineToReserve,
+  getReserveMedicines
 };
