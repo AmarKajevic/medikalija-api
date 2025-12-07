@@ -5,7 +5,6 @@ import {
   logout,
   refresh,
   register,
-  verify,
   listUsers,
   deleteUser
 } from "../controllers/authController.js";
