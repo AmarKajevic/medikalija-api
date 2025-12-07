@@ -1,35 +1,35 @@
-import mongoose from "mongoose";
+// import mongoose from "mongoose";
 
-const medicineReserveSchema = new mongoose.Schema(
-  {
-    medicine: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Medicine",
-      required: true,
-    },
+// const medicineReserveSchema = new mongoose.Schema(
+//   {
+//     medicine: {
+//       type: mongoose.Schema.Types.ObjectId,
+//       ref: "Medicine",
+//       required: true,
+//     },
 
-    name: { type: String, required: true },
+//     name: { type: String, required: true },
 
-    amount: { type: Number, required: true }, // koliko je premešteno
+//     amount: { type: Number, required: true }, // koliko je premešteno
 
-    source: {
-      type: String,
-      enum: ["home", "family"],
-      required: true,
-    },
+//     source: {
+//       type: String,
+//       enum: ["home", "family"],
+//       required: true,
+//     },
 
-    pricePerUnit: { type: Number },
+//     pricePerUnit: { type: Number },
 
-    createdBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-    },
-  },
-  { timestamps: true }
-);
+//     createdBy: {
+//       type: mongoose.Schema.Types.ObjectId,
+//       ref: "User",
+//     },
+//   },
+//   { timestamps: true }
+// );
 
-const MedicineReserve = mongoose.model(
-  "MedicineReserve",
-  medicineReserveSchema
-);
-export default MedicineReserve;
+// const MedicineReserve = mongoose.model(
+//   "MedicineReserve",
+//   medicineReserveSchema
+// );
+// export default MedicineReserve;
