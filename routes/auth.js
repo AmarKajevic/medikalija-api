@@ -13,12 +13,6 @@ import {
 import authMiddleware from "../middleware/authMiddleware.js";
 
 const router = express.Router();
-router.use((req, res, next) => {
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(200);
-  }
-  next();
-});
 
 
 // ---------------- AUTH ----------------
