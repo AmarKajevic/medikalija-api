@@ -8,7 +8,6 @@ import { createNotification } from "../services/notificationService.js";
 import MedicineReserve from "../models/medicineReserve.js";
 
 
-
 /**
  * Helper – nakon svake izmene količine,
  * izračunamo broj punih pakovanja.
