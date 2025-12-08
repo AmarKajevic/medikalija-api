@@ -19,6 +19,7 @@ import nurseActionRouter from "./routes/nurseActionsRoutes.js"
 import calendarRoutes from "./routes/calendarRoutes.js"
 import notificationRoutes from "./routes/notification.js"
 import searchRouter from "./routes/search.js"
+import medicineReserveRouter from "./routes/medicineReserve.js";
 
 dotenv.config()
 
@@ -49,6 +50,7 @@ app.use('/api/nurse-actions', nurseActionRouter)
 app.use('/api/calendar', calendarRoutes)
 app.use('/api/notifications', notificationRoutes)
 app.use("/api/search", searchRouter);
+app.use("/api/medicine-reserve", medicineReserveRouter);
 
 async function startServer() {
   await connectToDatabase();  // ⭐ OBAVEZNO PRE STARTA SERVERA
