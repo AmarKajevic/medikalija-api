@@ -69,14 +69,29 @@ export const moveToReserve = async (req, res) => {
     await medicine.save();
 
     // ✅ UPIS U REZERVU
-    const reserveItem = await MedicineReserve.create({
-      medicine: medicine._id,
-      name: medicine.name,
-      amount: moveAmount,
-      source,
-      pricePerUnit: medicine.pricePerUnit,
-      createdBy: req.user._id,
+    // ✅ UPIS U REZERVU (AKO POSTOJI → UVEĆAJ KOLIČINU)
+    let reserveItem = await MedicineReserve.findOne({
+    medicine: medicine._id,
+    source: source,
     });
+
+    if (reserveItem) {
+    // ✅ VEĆ POSTOJI → samo povećaj količinu
+    reserveItem.amount += moveAmount;
+    reserveItem.updatedAt = new Date();
+    await reserveItem.save();
+    } else {
+    // ✅ NE POSTOJI → napravi novi
+    reserveItem = await MedicineReserve.create({
+        medicine: medicine._id,
+        name: medicine.name,
+        amount: moveAmount,
+        source,
+        pricePerUnit: medicine.pricePerUnit,
+        createdBy: req.user._id,
+    });
+    }
+
 
     return res.status(200).json({
       success: true,
