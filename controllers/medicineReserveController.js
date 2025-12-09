@@ -1,7 +1,6 @@
 import Medicine from "../models/Medicine.js";
 import MedicineReserve from "../models/medicineReserve.js";
 
-// helper iz tvog sistema
 function recalcPackages(medicine) {
   const u = medicine.unitsPerPackage || 0;
 
@@ -16,51 +15,30 @@ function recalcPackages(medicine) {
   }
 }
 
-// ✅ PREMEŠTANJE U REZERVU
+// ✅ PREMEŠTANJE U REZERVU (SABIRANJE, NE DUPLIKAT)
 export const moveToReserve = async (req, res) => {
   try {
     const { medicineId, amount, source } = req.body;
 
-    if (!medicineId || !amount || !source) {
-      return res.status(400).json({
-        success: false,
-        message: "medicineId, amount i source su obavezni",
-      });
-    }
-
     const moveAmount = Number(amount);
-    if (moveAmount <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Količina mora biti veća od nule",
-      });
+    if (!medicineId || moveAmount <= 0 || !["home", "family"].includes(source)) {
+      return res.status(400).json({ success: false });
     }
 
     const medicine = await Medicine.findById(medicineId);
-    if (!medicine) {
-      return res.status(404).json({
-        success: false,
-        message: "Lek nije pronađen",
-      });
-    }
+    if (!medicine) return res.status(404).json({ success: false });
 
     // ✅ SKIDANJE SA IZVORA
     if (source === "home") {
       if (medicine.quantity < moveAmount) {
-        return res.status(400).json({
-          success: false,
-          message: "Nema dovoljno leka na stanju u domu",
-        });
+        return res.status(400).json({ message: "Nema dovoljno leka u domu" });
       }
       medicine.quantity -= moveAmount;
     }
 
     if (source === "family") {
       if (medicine.familyQuantity < moveAmount) {
-        return res.status(400).json({
-          success: false,
-          message: "Nema dovoljno leka iz porodice",
-        });
+        return res.status(400).json({ message: "Nema dovoljno leka iz porodice" });
       }
       medicine.familyQuantity -= moveAmount;
     }
@@ -68,44 +46,91 @@ export const moveToReserve = async (req, res) => {
     recalcPackages(medicine);
     await medicine.save();
 
-    // ✅ UPIS U REZERVU
-    // ✅ UPIS U REZERVU (AKO POSTOJI → UVEĆAJ KOLIČINU)
+    // ✅ AKO POSTOJI U REZERVI → UVEĆAJ
     let reserveItem = await MedicineReserve.findOne({
-    medicine: medicine._id,
-    source: source,
+      medicine: medicine._id,
+      source,
     });
 
     if (reserveItem) {
-    // ✅ VEĆ POSTOJI → samo povećaj količinu
-    reserveItem.amount += moveAmount;
-    reserveItem.updatedAt = new Date();
-    await reserveItem.save();
+      reserveItem.amount += moveAmount;
+      await reserveItem.save();
     } else {
-    // ✅ NE POSTOJI → napravi novi
-    reserveItem = await MedicineReserve.create({
+      reserveItem = await MedicineReserve.create({
         medicine: medicine._id,
         name: medicine.name,
         amount: moveAmount,
         source,
         pricePerUnit: medicine.pricePerUnit,
         createdBy: req.user._id,
-    });
+      });
     }
-
 
     return res.status(200).json({
       success: true,
       reserveItem,
       medicine,
     });
+
   } catch (error) {
     console.error("moveToReserve error:", error);
-    return res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    res.status(500).json({ success: false });
   }
 };
+export const deleteReserveItem = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await MedicineReserve.findByIdAndDelete(id);
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    return res.status(500).json({ success: false });
+  }
+};
+export const returnFromReserve = async (req, res) => {
+  try {
+    const { reserveId, amount } = req.body;
+
+    const backAmount = Number(amount);
+    if (!reserveId || backAmount <= 0) {
+      return res.status(400).json({ success: false });
+    }
+
+    const reserve = await MedicineReserve.findById(reserveId);
+    if (!reserve || reserve.amount < backAmount) {
+      return res.status(400).json({ success: false });
+    }
+
+    const medicine = await Medicine.findById(reserve.medicine);
+    if (!medicine) return res.status(404).json({ success: false });
+
+    // ✅ VRAĆANJE NA IZVOR
+    if (reserve.source === "home") {
+      medicine.quantity += backAmount;
+    }
+
+    if (reserve.source === "family") {
+      medicine.familyQuantity += backAmount;
+    }
+
+    reserve.amount -= backAmount;
+
+    if (reserve.amount === 0) {
+      await reserve.deleteOne();
+    } else {
+      await reserve.save();
+    }
+
+    recalcPackages(medicine);
+    await medicine.save();
+
+    return res.status(200).json({ success: true });
+
+  } catch (error) {
+    console.error("returnFromReserve error:", error);
+    res.status(500).json({ success: false });
+  }
+};
+
 
 // ✅ LISTA REZERVE
 export const getReserve = async (req, res) => {
