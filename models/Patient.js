@@ -6,6 +6,10 @@ const PatientSchema = new mongoose.Schema({
     dateOfBirth: { type: Date, required: true },
     address: { type: String, required: true },
     admissionDate: { type: Date, required: true },
+     contactPerson: {
+    type: String,
+    default: "",
+    },
     dischargeDate: {
         type: Date,
         default: null

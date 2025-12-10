@@ -33,7 +33,7 @@ const addPatient = async(req, res) => {
       return res.status(403).json({ success: false, message: "Nemate dozvolu da dodate pacijenta" });
     }
 
-    const { name, lastName, dateOfBirth, address, admissionDate } = req.body;
+    const { name, lastName, dateOfBirth, address, admissionDate, contactPerson } = req.body;
 
     const patient = await Patient.create({
       name,
@@ -41,6 +41,7 @@ const addPatient = async(req, res) => {
       dateOfBirth,
       address,
       admissionDate,
+      contactPerson: contactPerson || "",
       createdBy: req.user._id,
     });
 
