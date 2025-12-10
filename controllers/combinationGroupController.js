@@ -92,6 +92,29 @@ const getGroups = async (req, res)=> {
     
     
 }
+// ✅ BRISANJE CELE GRUPE
+const deleteGroup = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const deleted = await CombinationGroup.findByIdAndDelete(id);
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Grupa nije pronađena",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Grupa uspešno obrisana",
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
 
 
-export{addCombinationToGroup,getGroups}
+
+export{addCombinationToGroup,getGroups, deleteGroup}

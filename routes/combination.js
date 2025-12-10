@@ -1,6 +1,6 @@
 import express from "express"
 import authMiddleware from "../middleware/authMiddleware.js"
-import { addCombination, addCombinationToPatient, getCombinations, getPatientCombinations, getUsedCombination } from "../controllers/combinationController.js"
+import { addCombination, addCombinationToPatient, deleteCombination, getCombinations, getPatientCombinations, getUsedCombination } from "../controllers/combinationController.js"
 import UsedCombinations from "../models/UsedCombinations.js"
 
 const router = express.Router()
@@ -10,6 +10,7 @@ router.get("/",authMiddleware, getCombinations)
 router.get("/:patientId",authMiddleware, getUsedCombination)
 router.post("/addToPatient/:patientId",authMiddleware, addCombinationToPatient)
 router.get("/combinations/:patientId", authMiddleware, getPatientCombinations)
+router.delete("/combinations/:id",authMiddleware, deleteCombination);
 router.delete("/patient/:patientId/combinations/delete-all",authMiddleware, async (req, res) => {
     try {
         await UsedCombinations.deleteMany({ patient: req.params.patientId });

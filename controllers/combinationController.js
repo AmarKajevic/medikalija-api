@@ -1,5 +1,6 @@
 import Analysis from "../models/Analysis.js";
 import Combination from "../models/Combination.js";
+import CombinationGroup from "../models/CombinationGroup.js";
 import Specification from "../models/Specification.js";
 import UsedCombinations from "../models/UsedCombinations.js";
 import { getOrCreateActiveSpecification } from "../services/getOrCreateActiveSpecification.js";
@@ -164,6 +165,34 @@ export const getPatientCombinations = async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ success: false, message: error.message });
+  }
+};
+// ✅ BRISANJE KOMBINACIJE
+export const deleteCombination = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const deleted = await Combination.findByIdAndDelete(id);
+
+    if (!deleted) {
+      return res.status(404).json({
+        success: false,
+        message: "Kombinacija nije pronađena",
+      });
+    }
+
+    // ✅ Obriši kombinaciju i iz svih grupa gde postoji
+    await CombinationGroup.updateMany(
+      {},
+      { $pull: { combinations: { _id: id } } }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Kombinacija uspešno obrisana",
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
