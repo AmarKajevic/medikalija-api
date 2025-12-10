@@ -191,6 +191,57 @@ const getSpecificationById = async (req, res) => {
     return res.status(500).json({ success: false, message: err.message });
   }
 };
+// ✅ BRISANJE STAVKE IZ SPECIFIKACIJE
+const deleteSpecificationItem = async (req, res) => {
+  try {
+    const { specId, itemId } = req.params;
+
+    const spec = await Specification.findById(specId);
+    if (!spec) {
+      return res.status(404).json({
+        success: false,
+        message: "Specifikacija nije pronađena",
+      });
+    }
+
+    const itemIndex = spec.items.findIndex(
+      (i) => i._id.toString() === itemId
+    );
+
+    if (itemIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: "Stavka nije pronađena",
+      });
+    }
+
+    const removedItem = spec.items[itemIndex];
+
+    // ✅ smanji totalPrice
+    spec.totalPrice = Math.max(
+      0,
+      (spec.totalPrice || 0) - (removedItem.price || 0)
+    );
+
+    // ✅ ukloni stavku
+    spec.items.splice(itemIndex, 1);
+
+    await spec.save();
+
+    return res.json({
+      success: true,
+      message: "Stavka obrisana",
+      specification: spec,
+    });
+  } catch (err) {
+    console.error("deleteSpecificationItem:", err);
+    return res.status(500).json({
+      success: false,
+      message: err.message,
+    });
+  }
+};
 
 
-export {getSpecification, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification}
+
+export {getSpecification, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem}
