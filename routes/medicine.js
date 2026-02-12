@@ -11,7 +11,13 @@ router.get ("/",authMiddleware, getMedicines)
 router.get ("/:medicineId",authMiddleware, getMedicine)
 router.put ("/:medicineId",authMiddleware, updateMedicine)
 router.delete ("/:medicineId",authMiddleware, deleteMedicine)
-router.get ("/patient/:patientId",authMiddleware, getPatientMedicine)
+
+router.get(
+  "/../patient/:patientId/medicines",
+  authMiddleware,
+  getPatientMedicine
+);
+
 router.get(
   "/patient/:patientId/stock",
   authMiddleware,
