@@ -1,5 +1,7 @@
 import express from "express"
-import { addMedicine, deleteMedicine, getMedicine, getMedicines, getPatientMedicine, updateMedicine, useMedicine,getPatientStockMedicines,updatePatientMedicine } from "../controllers/medicineController.js"
+import { addMedicine, deleteMedicine, getMedicine, getMedicines,
+   getPatientMedicine, updateMedicine, useMedicine,
+   getPatientStockMedicines,updatePatientMedicine , deletePatientMedicine} from "../controllers/medicineController.js"
 import authMiddleware from "../middleware/authMiddleware.js"
 import UsedMedicine from "../models/UsedMedicine.js"
 
@@ -28,6 +30,11 @@ router.put(
   "/patient-stock/:id",
   authMiddleware,
   updatePatientMedicine
+);
+router.delete(
+  "/patient-stock/:id",
+  authMiddleware,
+  deletePatientMedicine
 );
 
 router.delete(

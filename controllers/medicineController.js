@@ -504,6 +504,39 @@ const updatePatientMedicine = async (req, res) => {
     });
   }
 };
+/**
+ * =========================================
+ * DELETE FAMILY MEDICINE (PatientMedicine)
+ * =========================================
+ */
+const deletePatientMedicine = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const patientMedicine = await PatientMedicine.findById(id);
+
+    if (!patientMedicine) {
+      return res.status(404).json({
+        success: false,
+        message: "Porodični lek nije pronađen",
+      });
+    }
+
+    await PatientMedicine.findByIdAndDelete(id);
+
+    return res.status(200).json({
+      success: true,
+      message: "Porodični lek uspešno obrisan",
+    });
+
+  } catch (error) {
+    console.error("deletePatientMedicine error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 
 
 export {
@@ -515,5 +548,6 @@ export {
   updateMedicine,
   deleteMedicine,
   getPatientStockMedicines,
-  updatePatientMedicine
+  updatePatientMedicine,
+  deletePatientMedicine
 };
