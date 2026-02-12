@@ -1,5 +1,5 @@
 import express from "express"
-import { addMedicine, deleteMedicine, getMedicine, getMedicines, getPatientMedicine, updateMedicine, useMedicine,getPatientStockMedicines } from "../controllers/medicineController.js"
+import { addMedicine, deleteMedicine, getMedicine, getMedicines, getPatientMedicine, updateMedicine, useMedicine,getPatientStockMedicines,updatePatientMedicine } from "../controllers/medicineController.js"
 import authMiddleware from "../middleware/authMiddleware.js"
 import UsedMedicine from "../models/UsedMedicine.js"
 
