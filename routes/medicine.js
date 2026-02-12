@@ -13,7 +13,7 @@ router.put ("/:medicineId",authMiddleware, updateMedicine)
 router.delete ("/:medicineId",authMiddleware, deleteMedicine)
 
 router.get(
-  "/../patient/:patientId/medicines",
+  "/patient/:patientId/medicines",
   authMiddleware,
   getPatientMedicine
 );
