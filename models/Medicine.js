@@ -10,7 +10,7 @@ const medicineSchema = new mongoose.Schema(
     quantity: { type: Number, required: true, default: 0 },
 
     // 👇 ukupna količina tableta od porodica (centralno, ne po pacijentu)
-    familyQuantity: { type: Number, default: 0 },
+    // familyQuantity: { type: Number, default: 0 },
 
     // 👇 koliko tableta ima jedno pakovanje (važi za ovaj lek)
     unitsPerPackage: { type: Number, default: 0 },
@@ -19,7 +19,7 @@ const medicineSchema = new mongoose.Schema(
     packageCount: { type: Number, default: 0 },
 
     // 👇 koliko *punih* pakovanja ima porodica (računa se iz familyQuantity)
-    familyPackageCount: { type: Number, default: 0 },
+    // familyPackageCount: { type: Number, default: 0 },
 
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },
