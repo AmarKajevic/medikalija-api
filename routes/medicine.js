@@ -1,5 +1,5 @@
 import express from "express"
-import { addMedicine, deleteMedicine, getMedicine, getMedicines, getPatientMedicine, updateMedicine, useMedicine } from "../controllers/medicineController.js"
+import { addMedicine, deleteMedicine, getMedicine, getMedicines, getPatientMedicine, updateMedicine, useMedicine,getPatientStockMedicines } from "../controllers/medicineController.js"
 import authMiddleware from "../middleware/authMiddleware.js"
 import UsedMedicine from "../models/UsedMedicine.js"
 
@@ -12,6 +12,12 @@ router.get ("/:medicineId",authMiddleware, getMedicine)
 router.put ("/:medicineId",authMiddleware, updateMedicine)
 router.delete ("/:medicineId",authMiddleware, deleteMedicine)
 router.get ("/patient/:patientId",authMiddleware, getPatientMedicine)
+router.get(
+  "/patient/:patientId/stock",
+  authMiddleware,
+  getPatientStockMedicines
+);
+
 router.delete(
   "/patient/:patientId/medicines/delete-all",
   authMiddleware,

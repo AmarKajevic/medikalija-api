@@ -425,6 +425,44 @@ const getPatientMedicine = async (req, res) => {
     return res.status(500).json({ success: false, message: error.message });
   }
 };
+/**
+ * =====================================================
+ * GET CURRENT STOCK OF MEDICINES FOR PATIENT
+ * =====================================================
+ */
+const getPatientStockMedicines = async (req, res) => {
+  try {
+    const { patientId } = req.params;
+
+    const patientMedicines = await PatientMedicine.find({
+      patient: patientId,
+      quantity: { $gt: 0 },
+    }).populate("medicine", "name unitsPerPackage");
+
+    const formatted = patientMedicines.map((pm) => ({
+      _id: pm.medicine._id,
+      name: pm.medicine.name,
+      familyQuantity: pm.quantity,
+      unitsPerPackage: pm.medicine.unitsPerPackage || 0,
+      familyPackageCount:
+        pm.medicine.unitsPerPackage > 0
+          ? Math.floor(pm.quantity / pm.medicine.unitsPerPackage)
+          : 0,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      medicines: formatted,
+    });
+  } catch (error) {
+    console.error("getPatientStockMedicines error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
 
 export {
   addMedicine,
@@ -434,4 +472,5 @@ export {
   getPatientMedicine,
   updateMedicine,
   deleteMedicine,
+  getPatientStockMedicines
 };
