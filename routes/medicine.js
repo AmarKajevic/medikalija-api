@@ -8,7 +8,7 @@ const router = express.Router()
 router.post ("/add",authMiddleware, addMedicine)
 router.post ("/use",authMiddleware, useMedicine)
 router.get ("/",authMiddleware, getMedicines)
-router.get ("/:medicineId",authMiddleware, getMedicine)
+
 router.put ("/:medicineId",authMiddleware, updateMedicine)
 router.delete ("/:medicineId",authMiddleware, deleteMedicine)
 
@@ -23,7 +23,7 @@ router.get(
   authMiddleware,
   getPatientStockMedicines
 );
-
+router.get ("/:medicineId",authMiddleware, getMedicine)
 router.delete(
   "/patient/:patientId/medicines/delete-all",
   authMiddleware,
@@ -40,6 +40,7 @@ router.delete(
     }
   }
 );
+
 
 
 
