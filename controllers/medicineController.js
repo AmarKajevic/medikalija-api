@@ -462,6 +462,48 @@ const getPatientStockMedicines = async (req, res) => {
     });
   }
 };
+/**
+ * =========================================
+ * UPDATE FAMILY MEDICINE (PatientMedicine)
+ * =========================================
+ */
+const updatePatientMedicine = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { quantity, addQuantity } = req.body;
+
+    const patientMedicine = await PatientMedicine.findById(id);
+
+    if (!patientMedicine) {
+      return res.status(404).json({
+        success: false,
+        message: "Porodični lek nije pronađen",
+      });
+    }
+
+    if (quantity !== undefined) {
+      patientMedicine.quantity = Number(quantity);
+    }
+
+    if (addQuantity !== undefined) {
+      patientMedicine.quantity += Number(addQuantity);
+    }
+
+    await patientMedicine.save();
+
+    return res.status(200).json({
+      success: true,
+      patientMedicine,
+    });
+
+  } catch (error) {
+    console.error("updatePatientMedicine error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
 
 
 export {
@@ -472,5 +514,6 @@ export {
   getPatientMedicine,
   updateMedicine,
   deleteMedicine,
-  getPatientStockMedicines
+  getPatientStockMedicines,
+  updatePatientMedicine
 };

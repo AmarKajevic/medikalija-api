@@ -24,6 +24,12 @@ router.get(
   getPatientStockMedicines
 );
 router.get ("/:medicineId",authMiddleware, getMedicine)
+router.put(
+  "/patient-stock/:id",
+  authMiddleware,
+  updatePatientMedicine
+);
+
 router.delete(
   "/patient/:patientId/medicines/delete-all",
   authMiddleware,
