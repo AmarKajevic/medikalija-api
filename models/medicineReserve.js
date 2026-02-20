@@ -8,6 +8,12 @@ const medicineReserveSchema = new mongoose.Schema(
       required: true,
     },
 
+    patient: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Patient",
+      required: false, // obavezno samo ako je source = family
+    },
+
     name: { type: String, required: true },
 
     amount: { type: Number, required: true },
@@ -27,6 +33,7 @@ const medicineReserveSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+
 
 const MedicineReserve = mongoose.model(
   "MedicineReserve",
