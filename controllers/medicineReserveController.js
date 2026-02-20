@@ -117,60 +117,62 @@ export const deleteReserveItem = async (req, res) => {
 };
 export const returnFromReserve = async (req, res) => {
   try {
-    const { reserveId, amount } = req.body;
+    const { reserveId, amount, destination } = req.body;
+    const moveAmount = Number(amount);
 
-    const backAmount = Number(amount);
-    if (!reserveId || backAmount <= 0) {
+    if (!reserveId || moveAmount <= 0 || !["family", "home"].includes(destination)) {
       return res.status(400).json({ success: false });
     }
 
-    const reserve = await MedicineReserve.findById(reserveId);
-    if (!reserve || reserve.amount < backAmount) {
-      return res.status(400).json({ success: false });
+    const reserveItem = await MedicineReserve.findById(reserveId);
+    if (!reserveItem || reserveItem.amount < moveAmount) {
+      return res.status(400).json({ message: "Nema dovoljno u rezervi" });
     }
 
-    const medicine = await Medicine.findById(reserve.medicine);
-    if (!medicine) return res.status(404).json({ success: false });
+    // SMANJUJEMO REZERVU
+    reserveItem.amount -= moveAmount;
+    await reserveItem.save();
 
-    // ✅ VRAĆANJE NA IZVOR
-    if (reserve.source === "home") {
-      medicine.quantity += backAmount;
-    }
-
-    if (reserve.source === "family") {
-      const patientMedicine = await PatientMedicine.findOne({
-        patient: reserve.patient,
-        medicine: reserve.medicine,
+    // ================= VRATI PACIJENTU =================
+    if (destination === "family") {
+      let patientMedicine = await PatientMedicine.findOne({
+        patient: reserveItem.patient,
+        medicine: reserveItem.medicine,
       });
 
-      if (patientMedicine) {
-        patientMedicine.quantity += backAmount;
+      if (!patientMedicine) {
+        patientMedicine = await PatientMedicine.create({
+          patient: reserveItem.patient,
+          medicine: reserveItem.medicine,
+          quantity: moveAmount,
+        });
+      } else {
+        patientMedicine.quantity += moveAmount;
         await patientMedicine.save();
       }
     }
 
-    // 🔥 OVO FALI
-    reserve.amount -= backAmount;
+    // ================= VRATI U DOM =================
+    if (destination === "home") {
+      const medicine = await Medicine.findById(reserveItem.medicine);
 
-    if (reserve.amount === 0) {
-      await reserve.deleteOne();
-    } else {
-      await reserve.save();
+      if (!medicine) {
+        return res.status(404).json({ message: "Lek ne postoji u domu" });
+      }
+
+      medicine.quantity += moveAmount;
+      recalcPackages(medicine);
+      await medicine.save();
     }
-
-    recalcPackages(medicine);
-    await medicine.save();
-
-
-
 
     return res.status(200).json({ success: true });
 
-  } catch (error) {
-    console.error("returnFromReserve error:", error);
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ success: false });
   }
 };
+
 
 
 // ✅ LISTA REZERVE
