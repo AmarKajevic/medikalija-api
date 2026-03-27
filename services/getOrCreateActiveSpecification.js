@@ -42,6 +42,9 @@ export async function getOrCreateActiveSpecification(patientId) {
       startDate,
       endDate,
     });
+  
+  
+  
   }
 
   return spec;
