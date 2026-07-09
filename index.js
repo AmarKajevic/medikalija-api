@@ -32,6 +32,7 @@ app.use(
   cors({
     origin: [
   "https://medikalija-frontend.vercel.app",
+  
 ],
     credentials: true,
   })
