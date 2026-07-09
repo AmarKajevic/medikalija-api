@@ -20,6 +20,7 @@ import calendarRoutes from "./routes/calendarRoutes.js"
 import notificationRoutes from "./routes/notification.js"
 import searchRouter from "./routes/search.js"
 import medicineReserveRouter from "./routes/medicineReserve.js";
+import exchangeRatesRouter from "./routes/exchangeRate.js"
 
 dotenv.config()
 
@@ -29,7 +30,10 @@ app.use(express.json());
 app.use(cookieParser());
 app.use(
   cors({
-    origin: "https://medikalija-frontend.vercel.app",
+    origin: [
+  "http://localhost:5173",
+  "https://medikalija-frontend.vercel.app",
+],
     credentials: true,
   })
 );
@@ -51,6 +55,7 @@ app.use('/api/calendar', calendarRoutes)
 app.use('/api/notifications', notificationRoutes)
 app.use("/api/search", searchRouter);
 app.use("/api/medicine-reserve", medicineReserveRouter);
+app.use("/api/exchange-rates", exchangeRatesRouter);
 
 async function startServer() {
   await connectToDatabase();  // ⭐ OBAVEZNO PRE STARTA SERVERA

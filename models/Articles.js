@@ -17,8 +17,6 @@ const articleSchema = new mongoose.Schema(
     // 👇 broj punih pakovanja (računa se iz quantity)
     packageCount: { type: Number, default: 0 },
 
-    // 👇 broj punih porodičnih pakovanja (računa se iz familyQuantity)
-    familyPackageCount: { type: Number, default: 0 },
 
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },

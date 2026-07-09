@@ -274,6 +274,7 @@ const useMedicine = async (req, res) => {
 
     const medicine = await Medicine.findById(medicineId);
     const patient = await Patient.findById(patientId);
+    const spec = await getOrCreateActiveSpecification(patientId);
 
     if (!medicine) return res.status(404).json({ success: false, message: "Lek nije pronađen" });
     if (!patient) return res.status(404).json({ success: false, message: "Pacijent nije pronađen" });
@@ -300,6 +301,7 @@ const useMedicine = async (req, res) => {
         success: true,
         message: "Sestra je dala lek — stanje se ne menja.",
         usedRecord,
+        specification: spec,
       });
     }
 
@@ -356,11 +358,12 @@ const useMedicine = async (req, res) => {
         success: true,
         message: "Iskorišćen porodični lek.",
         usedRecord,
+        specification: spec,
       });
     }
 
     const cost = homeUsed * medicine.pricePerUnit;
-    const spec = await getOrCreateActiveSpecification(patientId);
+
 
     const existingItem = spec.items.find(
       (i) => i.category === "medicine" && i.name === medicine.name
@@ -385,11 +388,12 @@ const useMedicine = async (req, res) => {
       (spec.extraCosts ?? 0);
 
     await spec.save();
-
+    const freshSpec = await getOrCreateActiveSpecification(patientId);
     return res.status(200).json({
       success: true,
       message: "Lek dodat u specifikaciju.",
       usedRecord,
+      specification: freshSpec,
     });
 
   } catch (error) {

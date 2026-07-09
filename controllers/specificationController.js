@@ -2,6 +2,7 @@ import mongoose from "mongoose";
 import Patient from "../models/Patient.js";
 import Specification from "../models/Specification.js"
 import { getOrCreateActiveSpecification } from "../services/getOrCreateActiveSpecification.js";
+import GlobalSetting from "../models/GlobalSetting.js";
 
 const getSpecification = async (req, res) => {
   try {
@@ -65,75 +66,56 @@ const addCostsToSpecification = async (req, res) => {
 };
 // controllers/specificationController.js (nastavak)
 
-// ✅ SAČUVAJ KOMPLETAN OBRAČUN (specifikacija + dug + smeštaj za naredni period)
+
 const saveBillingForSpecification = async (req, res) => {
   try {
     const { id } = req.params;
-    const {
-      previousDebtEUR,   // dug u evrima
-      nextLodgingEUR,    // smeštaj za naredni period u evrima
-      lowerExchangeRate, // niži kurs
-      middleExchangeRate // srednji kurs
-    } = req.body;
+    const { previousDebtEUR, nextLodgingEUR } = req.body; // backend više ne očekuje kurseve
 
     const spec = await Specification.findById(id);
     if (!spec) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Specifikacija nije pronađena." });
+      return res.status(404).json({ success: false, message: "Specifikacija nije pronađena" });
     }
 
-    const specTotalRSD = spec.totalPrice ?? 0;
+    // Dohvati globalne kurseve
+    const globalSettings = await GlobalSettingjokp.findOne();
+    const low = globalSettings?.lowerExchangeRate || 0;
+    const mid = globalSettings?.middleExchangeRate || 0;
 
-    const low = Number(lowerExchangeRate) || 0;
-    const mid = Number(middleExchangeRate) || 0;
     const debtEUR = Number(previousDebtEUR) || 0;
     const lodgingEUR = Number(nextLodgingEUR) || 0;
+    const specTotalRSD = spec.totalPrice ?? 0;
 
-    // ✅ SPECIFIKACIJA po NIŽEM kursu
     const specEUR = low > 0 ? specTotalRSD / low : 0;
-
-    // ✅ DUG po NIŽEM kursu (tvoja izmena)
-    const debtRSD = low > 0 ? debtEUR * low : 0;
-
-    // ✅ SMEŠTAJ za naredni period po SREDNJEM kursu
+    const debtRSD = mid > 0 ? debtEUR * mid : 0;
     const lodgingRSD = mid > 0 ? lodgingEUR * mid : 0;
-
     const totalRSD = specTotalRSD + debtRSD + lodgingRSD;
     const totalEUR = specEUR + debtEUR + lodgingEUR;
 
-    // izračunaj period smeštaja za naredni mesec (30 dana)
+    // Računanje narednog perioda (30 dana od kraja specifikacije)
     const currentEndDate = new Date(spec.endDate);
-    const nextStartDate = new Date(currentEndDate);
-    nextStartDate.setDate(nextStartDate.getDate() + 1);
-    const nextEndDate = new Date(nextStartDate);
-    nextEndDate.setDate(nextEndDate.getDate() + 29);
+    const nextPeriodStart = new Date(currentEndDate);
+    nextPeriodStart.setDate(nextPeriodStart.getDate() + 1);
+    const nextPeriodEnd = new Date(nextPeriodStart);
+    nextPeriodEnd.setDate(nextPeriodEnd.getDate() + 29);
 
     spec.billing = {
-      lowerExchangeRate: low,
-      middleExchangeRate: mid,
       previousDebtEUR: debtEUR,
-      previousDebtRSD: debtRSD,
       nextLodgingEUR: lodgingEUR,
-      nextLodgingRSD: lodgingRSD,
       specEUR,
       totalRSD,
       totalEUR,
-      nextPeriodStart: nextStartDate,
-      nextPeriodEnd: nextEndDate,
+      nextPeriodStart,
+      nextPeriodEnd,
     };
-
     await spec.save();
 
-    return res.json({ success: true, specification: spec });
+    res.json({ success: true, specification: spec });
   } catch (err) {
-    console.error(err);
-    return res
-      .status(500)
-      .json({ success: false, message: err.message });
+    console.error("saveBillingForSpecification error:", err);
+    return res.status(500).json({ success: false, message: err.message });
   }
 };
-
 
 
 // 📌 VRATI istoriju + aktivnu specifikaciju
@@ -241,7 +223,36 @@ const deleteSpecificationItem = async (req, res) => {
     });
   }
 };
+const calculatePreview = (req, res) => {
+  const {
+    specTotalRSD,
+    previousDebtEUR,
+    nextLodgingEUR,
+    lowerExchangeRate,
+    middleExchangeRate
+  } = req.body;
+
+  const low = Number(lowerExchangeRate) || 0;
+  const mid = Number(middleExchangeRate) || 0;
+  const debtEUR = Number(previousDebtEUR) || 0;
+  const lodgingEUR = Number(nextLodgingEUR) || 0;
+
+  const specEUR = low > 0 ? specTotalRSD / low : 0;
+  const debtRSD = mid > 0 ? debtEUR * mid : 0;
+  const lodgingRSD = mid > 0 ? lodgingEUR * mid : 0;
+
+  const totalRSD = specTotalRSD + debtRSD + lodgingRSD;
+  const totalEUR = specEUR + debtEUR + lodgingEUR;
+
+  return res.json({
+    specEUR,
+    debtRSD,
+    lodgingRSD,
+    totalRSD,
+    totalEUR
+  });
+};
 
 
 
-export {getSpecification, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem}
+export {getSpecification, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}

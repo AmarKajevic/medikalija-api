@@ -70,7 +70,10 @@ export const addCombinationToPatient = async (req, res) => {
       .populate("analyses", "name price");
 
     if (!combination) {
-      return res.status(404).json({ success: false, message: "Kombinacija nije pronađena" });
+      return res.status(404).json({
+        success: false,
+        message: "Kombinacija nije pronađena"
+      });
     }
 
     const analysesSnapshot = combination.analyses.map(a => ({
@@ -92,27 +95,49 @@ export const addCombinationToPatient = async (req, res) => {
       createdBy: req.user._id
     });
 
-    // 1️⃣ Uzimamo aktivnu specifikaciju
+    // 🔹 uzmi spec
     const spec = await getOrCreateActiveSpecification(patientId);
 
-    // 2️⃣ Dodajemo stavku u nju
-    spec.items.push({
-      name: combination.name,
-      category: "combination",
-      analyses: analysesSnapshot,
-      price: totalPriceAtTheTime,
-      date: new Date(),
-    });
+    const existingItem = spec.items.find(
+      item =>
+        item.category === "combination" &&
+        item.combination &&
+        item.combination.equals(combination._id)
+    );
 
+   if (existingItem) {
+  existingItem.amount = (existingItem.amount || 1) + 1;
+  existingItem.price += totalPriceAtTheTime;
+} else {
+  spec.items.push({
+    name: combination.name,
+    category: "combination",
+    combination: combination._id, // 🔴 OBAVEZNO ObjectId
+    analyses: analysesSnapshot,
+    price: totalPriceAtTheTime,
+    amount: 1,
+    date: new Date(),
+  });
+}
+
+    // 🔹 recalculacija totala
     spec.totalPrice =
-    spec.items.reduce((sum, i) => sum + (i.price ?? 0), 0) +
-    (spec.lodgingPrice ?? 0) +
-    (spec.extraCosts ?? 0);
+      spec.items.reduce((sum, i) => sum + (i.price ?? 0), 0) +
+      (spec.lodgingPrice ?? 0) +
+      (spec.extraCosts ?? 0);
+
     await spec.save();
 
-    return res.status(201).json({ success: true, usedCombination });
+    return res.status(201).json({
+      success: true,
+      usedCombination
+    });
+
   } catch (error) {
-    return res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({
+      success: false,
+      message: error.message
+    });
   }
 };
 

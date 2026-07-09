@@ -62,6 +62,18 @@ const getAnalyses = async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
     };
+    const getAnalysis = async (req, res) => {
+      try {
+        const {analysisId} = req.params
+        const analysis = await Analysis.findById(analysisId)
+        if(!analysis) {
+            return res.status(404).json({success: false, message: "Analiza nije pronadjena"})
+        }
+        res.status(200).json({success: true, analysis})
+      } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+      }
+    }
 
 const addAnalysisToPatient = async (req, res) => {
   try {
@@ -274,6 +286,7 @@ export{
     updateAnalysis,
     deleteAnalysis,
     getAnalyses,
+    getAnalysis,
     addAnalysisToPatient,
     getPatientAnalyses,
     assignCombinationToPatient,

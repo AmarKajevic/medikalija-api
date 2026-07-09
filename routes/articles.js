@@ -1,12 +1,13 @@
 import express from "express";
 import authMiddleware from "../middleware/authMiddleware.js";
-import { addArticle, addArticleToPatient, deleteArticle, getArticle, getArticles, getPatientArticles, updateArticle } from "../controllers/articlesController.js";
+import { addArticle, addArticleToPatient, deleteArticle, getArticle, getArticles, getPatientArticles, getPatientStockArticles, updateArticle } from "../controllers/articlesController.js";
 import UsedArticles from "../models/UsedArticles.js";
 
 const router = express.Router();
 
 router.post("/add", authMiddleware, addArticle);
 router.get("/", authMiddleware, getArticles);
+router.get("/patient/:patientId", authMiddleware, getPatientStockArticles);
 router.get("/:id", authMiddleware, getArticle);
 router.put("/:id", authMiddleware, updateArticle);
 router.delete("/:id", authMiddleware, deleteArticle);

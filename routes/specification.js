@@ -1,6 +1,6 @@
 import express from "express" 
 import authMiddleware from "../middleware/authMiddleware.js"
-import { addCostsToSpecification, deleteSpecificationItem, getSpecification, getSpecificationById, getSpecificationHistory, saveBillingForSpecification } from "../controllers/specificationController.js"
+import { addCostsToSpecification, calculatePreview, deleteSpecificationItem, getSpecification, getSpecificationById, getSpecificationHistory, saveBillingForSpecification } from "../controllers/specificationController.js"
 import { getFutureSpecificationPeriods } from "../services/getOrCreateActiveSpecification.js"
 
 const router = express.Router()
@@ -12,6 +12,7 @@ router.get("/view/:id", authMiddleware, getSpecificationById)
 router.get("/:patientId/future-spec-periods", getFutureSpecificationPeriods);
 router.post("/:id/billing", authMiddleware, saveBillingForSpecification);
 router.post("/:id/add-costs", authMiddleware, addCostsToSpecification);
+router.post("/calculate-preview", authMiddleware, calculatePreview)
 router.delete(
   "/:specId/item/:itemId",
   authMiddleware,

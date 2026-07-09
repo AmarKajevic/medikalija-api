@@ -11,6 +11,10 @@ const specificationSchema = new mongoose.Schema({
     {
       name: String,
       category: String,
+       combination: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Combination",
+        },
       analyses: [
         {
           _id: { type: mongoose.Schema.Types.ObjectId, ref: "Analysis" },
