@@ -20,5 +20,6 @@ const medicineSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+
 const Medicine = mongoose.model("Medicine", medicineSchema);
 export default Medicine;

@@ -31,7 +31,8 @@ app.use(cookieParser());
 app.use(
   cors({
     origin: [
-  "https://medikalija-frontend.vercel.app",
+  "https://medikalija-frontend.vercel.app"
+  // "http://localhost:5173"
   
 ],
     credentials: true,

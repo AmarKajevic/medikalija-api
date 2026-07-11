@@ -7,11 +7,12 @@ import UsedMedicine from "../models/UsedMedicine.js"
 
 const router = express.Router()
 
+
 router.post ("/add",authMiddleware, addMedicine)
 router.post ("/use",authMiddleware, useMedicine)
 router.get ("/",authMiddleware, getMedicines)
 
-router.put ("/:medicineId",authMiddleware, updateMedicine)
+router.put("/:medicineId", authMiddleware, updateMedicine);
 router.delete ("/:medicineId",authMiddleware, deleteMedicine)
 
 router.get(

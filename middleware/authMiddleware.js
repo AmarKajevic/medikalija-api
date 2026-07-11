@@ -24,6 +24,7 @@ const authMiddleware = async (req, res, next) => {
     }
 
     req.user = user;
+    
     next();
   } catch (err) {
     console.log("JWT error:", err.message);

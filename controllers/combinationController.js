@@ -119,6 +119,7 @@ export const addCombinationToPatient = async (req, res) => {
     date: new Date(),
   });
 }
+spec.items.sort((a, b) => a.name.localeCompare(b.name, 'sr'));
 
     // 🔹 recalculacija totala
     spec.totalPrice =

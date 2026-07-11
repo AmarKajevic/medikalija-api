@@ -187,6 +187,7 @@ const updateMedicine = async (req, res) => {
   try {
     const { medicineId } = req.params;
     const {
+      name,
       pricePerUnit,
       packages,
       unitsPerPackage,
@@ -194,7 +195,10 @@ const updateMedicine = async (req, res) => {
       addQuantity,
     } = req.body;
 
+    console.log("📦 updateMedicine - req.body:", req.body);
+
     const medicine = await Medicine.findById(medicineId);
+
     if (!medicine) {
       return res.status(404).json({
         success: false,
@@ -202,37 +206,87 @@ const updateMedicine = async (req, res) => {
       });
     }
 
+    // ✅ NAME UPDATE
+    if (name !== undefined) {
+      const trimmedName = name.trim();
+
+      if (!trimmedName) {
+        return res.status(400).json({
+          success: false,
+          message: "Naziv ne može biti prazan",
+        });
+      }
+
+      const existing = await Medicine.findOne({
+        name: trimmedName,
+        _id: { $ne: medicineId },
+      });
+
+      if (existing) {
+        return res.status(400).json({
+          success: false,
+          message: "Lek sa tim nazivom već postoji",
+        });
+      }
+
+      medicine.name = trimmedName;
+    }
+
+    // ✅ PRICE
     if (pricePerUnit !== undefined) {
-      medicine.pricePerUnit = Number(pricePerUnit);
+      const p = Number(pricePerUnit);
+      if (!Number.isNaN(p)) {
+        medicine.pricePerUnit = p;
+      }
     }
 
+    // ✅ UNITS
     if (unitsPerPackage !== undefined) {
-      medicine.unitsPerPackage = Number(unitsPerPackage) || 0;
+      const u = Number(unitsPerPackage);
+      if (!Number.isNaN(u)) {
+        medicine.unitsPerPackage = u;
+      }
     }
 
+    // ✅ SET QUANTITY
+    if (quantity !== undefined) {
+      const q = Number(quantity);
+      if (!Number.isNaN(q)) {
+        medicine.quantity = q;
+      }
+    }
+
+    // ✅ ADD QUANTITY
+    if (addQuantity !== undefined) {
+      const add = Number(addQuantity);
+      if (!Number.isNaN(add) && add > 0) {
+        medicine.quantity += add;
+      }
+    }
+
+    // ✅ PACKAGES → quantity
+    const pkgCount = Number(packages) || 0;
     const u = medicine.unitsPerPackage || 0;
 
-    if (quantity !== undefined) {
-      medicine.quantity = Number(quantity);
-    }
-
-    if (addQuantity !== undefined) {
-      medicine.quantity += Number(addQuantity);
-    }
-
-    const pkgCount = Number(packages) || 0;
     if (pkgCount > 0 && u > 0) {
       medicine.quantity += pkgCount * u;
     }
 
     recalcPackages(medicine);
+
     await medicine.save();
 
-    return res.status(200).json({ success: true, medicine });
+    return res.status(200).json({
+      success: true,
+      medicine,
+    });
 
   } catch (error) {
-    console.error("updateMedicine error:", error);
-    return res.status(500).json({ success: false, message: error.message });
+    console.error("❌ updateMedicine error:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
@@ -541,6 +595,8 @@ const deletePatientMedicine = async (req, res) => {
     });
   }
 };
+
+
 
 
 export {
