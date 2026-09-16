@@ -6,7 +6,7 @@ import Diagnosis from "../models/Diagnosis.js";
 export const getNurseActions = async (req, res) => {
   try {
     // samo admin i glavna sestra mogu da vide
-    if (!["admin", "head_nurse"].includes(req.user.role)) {
+    if (!["admin", "main-nurse"].includes(req.user.role)) {
       return res.status(403).json({ success: false, message: "Nedovoljno privilegija" });
     }
 

@@ -3,7 +3,7 @@ import UsedMedicine from "../models/UsedMedicine.js";
 import Patient from "../models/Patient.js";
 import PatientMedicine from "../models/PatientMedicine.js";
 
-import { getOrCreateActiveSpecification } from "../services/getOrCreateActiveSpecification.js";
+import { getActiveSpecification } from "../services/getOrCreateActiveSpecification.js";
 import { createNotification } from "../services/notificationService.js";
 
 /**
@@ -328,7 +328,7 @@ const useMedicine = async (req, res) => {
 
     const medicine = await Medicine.findById(medicineId);
     const patient = await Patient.findById(patientId);
-    const spec = await getOrCreateActiveSpecification(patientId);
+    const spec = await getActiveSpecification(patientId);
 
     if (!medicine) return res.status(404).json({ success: false, message: "Lek nije pronađen" });
     if (!patient) return res.status(404).json({ success: false, message: "Pacijent nije pronađen" });
@@ -442,7 +442,7 @@ const useMedicine = async (req, res) => {
       (spec.extraCosts ?? 0);
 
     await spec.save();
-    const freshSpec = await getOrCreateActiveSpecification(patientId);
+    const freshSpec = await getActiveSpecification(patientId);
     return res.status(200).json({
       success: true,
       message: "Lek dodat u specifikaciju.",

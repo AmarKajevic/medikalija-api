@@ -30,6 +30,7 @@ const specificationSchema = new mongoose.Schema({
   totalPrice: { type: Number, default: 0 },
   startDate: { type: Date, required: true },
   endDate: { type: Date, required: true },
+  isActive: { type: Boolean, default: false, index: true },
 
   // ❌ lodgingPrice više NE koristimo – uklonjeno
   // lodgingPrice: { type: Number, default: 0 },

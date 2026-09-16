@@ -4,7 +4,7 @@ import PatientArticle from "../models/PatientArticle.js";
 import UsedArticles from "../models/UsedArticles.js";
 import User from "../models/User.js";
 
-import { getOrCreateActiveSpecification } from "../services/getOrCreateActiveSpecification.js";
+import { getActiveSpecification } from "../services/getOrCreateActiveSpecification.js";
 import { createNotification } from "../services/notificationService.js";
 
 // 🧠 Računanje pakovanja
@@ -344,7 +344,7 @@ const addArticleToPatient = async (req, res) => {
   //   // 🟣 SPECIFIKACIJA — samo deo iz magacina
   //   // =====================================================
   //   if (fromStock > 0) {
-  //     const spec = await getOrCreateActiveSpecification(patientId);
+  //     const spec = await getActiveSpecification(patientId);
 
   //     const cost = fromStock * article.price;
 
@@ -391,7 +391,7 @@ const addArticleToPatient = async (req, res) => {
     const {patientId, articleId, amount} = req.body;
     const article = await Article.findById(articleId);
     const patient = await Patient.findById(patientId);
-    const spec = await getOrCreateActiveSpecification(patientId);
+    const spec = await getActiveSpecification(patientId);
 
     if(!article) return res.status(404).json({success: false, message: "artikli nisu pronadjeni"})
     if(!patient) return res.status(404).json({success: false, message: "pacijent nije pronadjen"})
@@ -506,7 +506,7 @@ const addArticleToPatient = async (req, res) => {
 
       await spec.save();
 
-      const freshSpec = await getOrCreateActiveSpecification(patientId);
+      const freshSpec = await getActiveSpecification(patientId);
        return res.status(200).json({
       success: true,
       message: "Artikal dodat u specifikaciju.",

@@ -1,14 +1,14 @@
 import mongoose from "mongoose";
 import Patient from "../models/Patient.js";
 import Specification from "../models/Specification.js"
-import { getOrCreateActiveSpecification } from "../services/getOrCreateActiveSpecification.js";
+import { getActiveSpecification, activateSpecificationPeriod, activateExistingSpecification } from "../services/getOrCreateActiveSpecification.js";
 import GlobalSetting from "../models/GlobalSetting.js";
 
 const getSpecification = async (req, res) => {
   try {
     const { patientId } = req.params;
 
-    const spec = await getOrCreateActiveSpecification(patientId);
+    const spec = await getActiveSpecification(patientId);
 
     if (!spec) {
       // pacijent je otpušten – NEMA aktivnih specifikacija
@@ -22,6 +22,45 @@ const getSpecification = async (req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// ✅ RUČNO AKTIVIRANJE PERIODA (nadoknada propuštenog perioda ili ručni izbor)
+const activatePeriod = async (req, res) => {
+  try {
+    const { patientId } = req.params;
+    const { startDate, endDate } = req.body;
+
+    if (!["admin", "main-nurse"].includes(req.user.role)) {
+      return res.status(403).json({ success: false, message: "Nemate dozvolu da menjate period specifikacije" });
+    }
+
+    if (!startDate || !endDate) {
+      return res.status(400).json({ success: false, message: "Nedostaje opseg datuma" });
+    }
+
+    const spec = await activateSpecificationPeriod(patientId, startDate, endDate);
+    return res.json({ success: true, specification: spec });
+  } catch (err) {
+    console.error("activatePeriod error:", err);
+    return res.status(err.status || 500).json({ success: false, message: err.message });
+  }
+};
+
+// ✅ REAKTIVIRANJE POSTOJEĆEG PERIODA IZ ISTORIJE (po ID-u, bez nagađanja datuma)
+const activateExisting = async (req, res) => {
+  try {
+    const { patientId, specId } = req.params;
+
+    if (!["admin", "main-nurse"].includes(req.user.role)) {
+      return res.status(403).json({ success: false, message: "Nemate dozvolu da menjate period specifikacije" });
+    }
+
+    const spec = await activateExistingSpecification(patientId, specId);
+    return res.json({ success: true, specification: spec });
+  } catch (err) {
+    console.error("activateExisting error:", err);
+    return res.status(err.status || 500).json({ success: false, message: err.message });
   }
 };
 // ✅ DODAVANJE SMESTAJA I DODATNIH TROŠKOVA
@@ -78,7 +117,7 @@ const saveBillingForSpecification = async (req, res) => {
     }
 
     // Dohvati globalne kurseve
-    const globalSettings = await GlobalSettingjokp.findOne();
+    const globalSettings = await GlobalSetting.findOne();
     const low = globalSettings?.lowerExchangeRate || 0;
     const mid = globalSettings?.middleExchangeRate || 0;
 
@@ -131,21 +170,12 @@ const getSpecificationHistory = async (req, res) => {
 
     const patient = await Patient.findById(patientId);
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Aktivan period je onaj eksplicitno markiran isActive:true (osim ako je
+    // pacijent otpušten — tada su sve specifikacije istorija).
+    let activeSpec = patient?.dischargeDate ? null : specs.find((s) => s.isActive) || null;
+    let history = specs.filter((s) => !activeSpec || s._id.toString() !== activeSpec._id.toString());
 
-    let activeSpec = null;
-    let history = [];
-
-    if (patient.dischargeDate) {
-      // 🔥 PACIJENT OTPUŠTEN → sve specifikacije su istorija
-      history = specs;
-    } else {
-      // 🔥 PACIJENT AKTIVAN
-      activeSpec = specs.find((s) => new Date(s.endDate) >= today);
-      history = specs.filter((s) => new Date(s.endDate) < today);
-    }
-      history = history.sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
+    history = history.sort((a, b) => new Date(b.startDate) - new Date(a.startDate));
 
     return res.json({
       activeSpec: activeSpec || null,
@@ -255,4 +285,4 @@ const calculatePreview = (req, res) => {
 
 
 
-export {getSpecification, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}
+export {getSpecification, activatePeriod, activateExisting, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}

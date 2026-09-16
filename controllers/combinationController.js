@@ -3,7 +3,7 @@ import Combination from "../models/Combination.js";
 import CombinationGroup from "../models/CombinationGroup.js";
 import Specification from "../models/Specification.js";
 import UsedCombinations from "../models/UsedCombinations.js";
-import { getOrCreateActiveSpecification } from "../services/getOrCreateActiveSpecification.js";
+import { getActiveSpecification } from "../services/getOrCreateActiveSpecification.js";
 
 // Dodavanje nove kombinacije
 export const addCombination = async (req, res) => {
@@ -96,7 +96,7 @@ export const addCombinationToPatient = async (req, res) => {
     });
 
     // 🔹 uzmi spec
-    const spec = await getOrCreateActiveSpecification(patientId);
+    const spec = await getActiveSpecification(patientId);
 
     const existingItem = spec.items.find(
       item =>

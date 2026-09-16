@@ -1,15 +1,17 @@
-import express from "express" 
+import express from "express"
 import authMiddleware from "../middleware/authMiddleware.js"
-import { addCostsToSpecification, calculatePreview, deleteSpecificationItem, getSpecification, getSpecificationById, getSpecificationHistory, saveBillingForSpecification } from "../controllers/specificationController.js"
+import { activatePeriod, activateExisting, addCostsToSpecification, calculatePreview, deleteSpecificationItem, getSpecification, getSpecificationById, getSpecificationHistory, saveBillingForSpecification } from "../controllers/specificationController.js"
 import { getFutureSpecificationPeriods } from "../services/getOrCreateActiveSpecification.js"
 
 const router = express.Router()
 
 
 router.get("/:patientId", authMiddleware, getSpecification)
+router.post("/:patientId/activate", authMiddleware, activatePeriod)
+router.post("/:patientId/activate/:specId", authMiddleware, activateExisting)
 router.get("/history/:patientId", authMiddleware, getSpecificationHistory)
 router.get("/view/:id", authMiddleware, getSpecificationById)
-router.get("/:patientId/future-spec-periods", getFutureSpecificationPeriods);
+router.get("/:patientId/future-spec-periods", authMiddleware, getFutureSpecificationPeriods);
 router.post("/:id/billing", authMiddleware, saveBillingForSpecification);
 router.post("/:id/add-costs", authMiddleware, addCostsToSpecification);
 router.post("/calculate-preview", authMiddleware, calculatePreview)

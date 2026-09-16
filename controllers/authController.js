@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken";
+import crypto from "crypto";
 import User from "../models/User.js";
 import Token from "../models/Token.js";
 import bcrypt from "bcrypt";
@@ -14,11 +15,32 @@ const generateAccessToken = (user) => {
 };
 
 const generateRefreshToken = (user) => {
+  // jti garantuje da je svaki refresh token jedinstven čak i kad se
+  // rotira više puta unutar iste sekunde (iat ima preciznost sekunde).
   return jwt.sign(
-    { _id: user._id, role: user.role },
+    { _id: user._id, role: user.role, jti: crypto.randomUUID() },
     process.env.JWT_REFRESH_SECRET,
     { expiresIn: "7d" }
   );
+};
+
+const REFRESH_TOKEN_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
+
+const refreshCookieOptions = () => ({
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
+  maxAge: REFRESH_TOKEN_MAX_AGE,
+});
+
+const issueRefreshToken = async (user) => {
+  const refreshToken = generateRefreshToken(user);
+  await Token.create({
+    user: user._id,
+    token: refreshToken,
+    expiresAt: new Date(Date.now() + REFRESH_TOKEN_MAX_AGE),
+  });
+  return refreshToken;
 };
 
 // ------------------ REGISTER ------------------
@@ -87,25 +109,13 @@ const login = async (req, res) => {
     }
 
     const accessToken = generateAccessToken(user);
-    const refreshToken = generateRefreshToken(user);
+    const refreshToken = await issueRefreshToken(user);
 
-    await Token.create({
-      user: user._id,
-      token: refreshToken,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    });
-
-    res.cookie("refreshToken", refreshToken, {
-      httpOnly: true,
-      secure: true,        // ✅ OBAVEZNO na HTTPS (Vercel)
-      sameSite: "none",    // ✅ OBAVEZNO za cross-domain
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    });
+    res.cookie("refreshToken", refreshToken, refreshCookieOptions());
 
     return res.status(200).json({
       success: true,
       accessToken,
-      refreshToken,
       user: {
         _id: user._id,
         name: user.name,
@@ -127,18 +137,36 @@ const refresh = async (req, res) => {
       return res.status(400).json({ success: false, message: "Nedostaje refresh token" });
 
     const stored = await Token.findOne({ token: refreshToken });
-    if (!stored)
+    if (!stored) {
+      // Token nepoznat serveru — već je rotiran ili je falsifikovan.
+      // Obrisi cookie kako bi se izbeglo dalje pokušavanje sa istim tokenom.
+      res.clearCookie("refreshToken", refreshCookieOptions());
       return res.status(403).json({ success: false, message: "Refresh token nije validan" });
+    }
 
-    const decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+    let decoded;
+    try {
+      decoded = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+    } catch (err) {
+      await Token.deleteOne({ _id: stored._id });
+      res.clearCookie("refreshToken", refreshCookieOptions());
+      return res.status(403).json({ success: false, message: "Neispravan ili istekao refresh token" });
+    }
+
     const user = await User.findById(decoded._id).select("-passwordHash");
-
-    if (!user)
+    if (!user) {
+      await Token.deleteOne({ _id: stored._id });
       return res.status(404).json({ success: false, message: "Korisnik ne postoji" });
+    }
 
-    const newToken = generateAccessToken(user);
+    // Rotacija: stari refresh token se briše, izdaje se novi.
+    await Token.deleteOne({ _id: stored._id });
+    const newRefreshToken = await issueRefreshToken(user);
+    res.cookie("refreshToken", newRefreshToken, refreshCookieOptions());
 
-    return res.status(200).json({ success: true, accessToken: newToken, user });
+    const newAccessToken = generateAccessToken(user);
+
+    return res.status(200).json({ success: true, accessToken: newAccessToken, user });
   } catch (err) {
     return res.status(403).json({ success: false, message: "Neispravan ili istekao refresh token" });
   }
@@ -151,7 +179,7 @@ const logout = async (req, res) => {
 
     if (refreshToken) {
       await Token.findOneAndDelete({ token: refreshToken });
-      res.clearCookie("refreshToken");
+      res.clearCookie("refreshToken", refreshCookieOptions());
     }
 
     return res.status(200).json({ success: true, message: "Logged out" });
