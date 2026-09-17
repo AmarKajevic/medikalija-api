@@ -30,7 +30,7 @@ const app = express();
 app.use(express.json());
 app.use(cookieParser());
 
-const allowedOrigins = (process.env.CORS_ORIGIN || "http://localhost:5173")
+const allowedOrigins = (process.env.CORS_ORIGIN || "https://medikalija-frontend.vercel.app")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
