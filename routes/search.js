@@ -2,10 +2,13 @@ import express from "express";
 import Medicine from "../models/Medicine.js";
 import Articles from "../models/Articles.js"; // ✔ ispravljeno ime modela
 import Patient from "../models/Patient.js";
+import authMiddleware from "../middleware/authMiddleware.js";
+import { escapeRegex } from "../utils/escapeRegex.js";
 
 const router = express.Router();
 
-router.get("/", async (req, res) => {
+// Pretraga otkriva imena pacijenata — dostupna samo prijavljenom osoblju
+router.get("/", authMiddleware, async (req, res) => {
   try {
     const query = req.query.q?.trim();
 
@@ -13,7 +16,7 @@ router.get("/", async (req, res) => {
       return res.json({ success: true, results: [] });
     }
 
-    const regex = new RegExp(query, "i");
+    const regex = new RegExp(escapeRegex(query.slice(0, 100)), "i");
 
     // 🟦 LEKOVI – sada vraća quantity i familyQuantity
     const medicines = await Medicine.find({ name: regex })
