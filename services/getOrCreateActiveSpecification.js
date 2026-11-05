@@ -64,14 +64,15 @@ export async function getActiveSpecification(patientId) {
 }
 
 // Deaktivira sve ostale specifikacije pacijenta i aktivira prosleđenu.
+// Atomični update-i (ne `save()`), da paralelni zahtevi koji istovremeno
+// aktiviraju isti period ne bi pali na proveri verzije dokumenta.
 async function setActiveSpec(patientId, spec) {
   await Specification.updateMany(
-    { patientId, _id: { $ne: spec._id } },
+    { patientId, _id: { $ne: spec._id }, isActive: true },
     { $set: { isActive: false } }
   );
-  spec.isActive = true;
-  await spec.save();
-  return spec;
+  await Specification.updateOne({ _id: spec._id }, { $set: { isActive: true } });
+  return Specification.findById(spec._id);
 }
 
 // Kreira (ili ponovo koristi postojeći) period po ručno unetom opsegu datuma

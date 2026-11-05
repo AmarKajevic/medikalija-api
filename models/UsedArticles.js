@@ -6,7 +6,11 @@ const usedArticlesSchema = new mongoose.Schema({
     amount: {type: Number, required: true},
     priceAtTheTime: {type: Number, required: true},
     fromFamily: {type: Boolean, default: false},
-    createdBy: {type: mongoose.Schema.Types.ObjectId, ref: "User", required: true},  
+    createdBy: {type: mongoose.Schema.Types.ObjectId, ref: "User", required: true},
+    // Koliko je uzeto sa porodičnog, a koliko sa kućnog (domskog) stanja
+    familyAmount: { type: Number, default: 0 },
+    homeAmount: { type: Number, default: 0 },
+    roleUsed: { type: String },  
 
 },
     {timestamps:true}
