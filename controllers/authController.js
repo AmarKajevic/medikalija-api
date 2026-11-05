@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken";
+import { escapeRegex } from "../utils/escapeRegex.js";
 import crypto from "crypto";
 import User from "../models/User.js";
 import Token from "../models/Token.js";
@@ -88,8 +89,8 @@ const login = async (req, res) => {
     }
 
     const user = await User.findOne({
-      name: { $regex: new RegExp(`^${name}$`, "i") },
-      lastName: { $regex: new RegExp(`^${lastName}$`, "i") },
+      name: { $regex: new RegExp(`^${escapeRegex(String(name).trim())}$`, "i") },
+      lastName: { $regex: new RegExp(`^${escapeRegex(String(lastName).trim())}$`, "i") },
     });
 
     if (!user) {

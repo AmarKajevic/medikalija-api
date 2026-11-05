@@ -33,7 +33,7 @@ const getDiagnosisTemplate = async (req, res ) => {
         const diagnosisTemplates = await DiagnosisTemplate.find().populate("createdBy","role name")
         return res.status(200).json({success:true, diagnosisTemplates})
     } catch (error) {
-        return res.status(500).json({success:!false, error: error.message,})
+        return res.status(500).json({ success: false, message: error.message })
     }
 }
 export {addDiagnosisTemplate, getDiagnosisTemplate}

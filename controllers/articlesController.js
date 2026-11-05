@@ -143,6 +143,7 @@ const updateArticle = async (req, res) => {
   try {
     const { id } = req.params;
     const {
+      name,
       price,
       fromFamily,
       packages,
@@ -154,6 +155,18 @@ const updateArticle = async (req, res) => {
     const article = await Article.findById(id);
     if (!article) {
       return res.status(404).json({ success: false, message: "Artikal nije pronađen." });
+    }
+
+    if (name !== undefined) {
+      const trimmed = String(name).trim();
+      if (!trimmed) {
+        return res.status(400).json({ success: false, message: "Naziv ne može biti prazan." });
+      }
+      const existing = await Article.findOne({ name: trimmed, _id: { $ne: id } });
+      if (existing) {
+        return res.status(400).json({ success: false, message: "Artikal sa tim nazivom već postoji." });
+      }
+      article.name = trimmed;
     }
 
     if (price !== undefined) {

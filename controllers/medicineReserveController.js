@@ -129,6 +129,14 @@ export const returnFromReserve = async (req, res) => {
       return res.status(400).json({ message: "Nema dovoljno u rezervi" });
     }
 
+    // Provere PRE umanjenja rezerve, da se količina ne izgubi
+    if (destination === "family" && !reserveItem.patient) {
+      return res.status(400).json({ message: "Ovaj lek je u rezervu stigao sa stanja doma — može se vratiti samo u dom." });
+    }
+    if (destination === "home" && !(await Medicine.exists({ _id: reserveItem.medicine }))) {
+      return res.status(404).json({ message: "Lek ne postoji u domu" });
+    }
+
     // SMANJUJEMO REZERVU
     reserveItem.amount -= moveAmount;
     await reserveItem.save();
