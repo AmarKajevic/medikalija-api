@@ -4,7 +4,7 @@ import PatientArticle from "../models/PatientArticle.js";
 import UsedArticles from "../models/UsedArticles.js";
 import User from "../models/User.js";
 
-import { getActiveSpecification } from "../services/getOrCreateActiveSpecification.js";
+import { consumeForPatient } from "../services/specificationCharges.js";
 import { createNotification } from "../services/notificationService.js";
 
 // 🧠 Računanje pakovanja
@@ -240,284 +240,23 @@ const getArticle = async (req, res) => {
 };
 
 const addArticleToPatient = async (req, res) => {
-  // try {
-  //   const { patientId, articleId, amount } = req.body;
-
-  //   console.log("🟦 addArticleToPatient pozvan!", req.body);
-
-  //   // 1) PACIJENT
-  //   const patient = await Patient.findById(patientId);
-  //   if (!patient) {
-  //     return res.status(404).json({ success: false, message: "Pacijent nije pronađen" });
-  //   }
-
-  //   // 2) ARTIKAL
-  //   const article = await Article.findById(articleId);
-  //   if (!article) {
-  //     return res.status(404).json({ success: false, message: "Artikal nije pronađen" });
-  //   }
-
-  //   // =====================================================
-  //   // 🔵  A) SESTRA — NE SME da menja zalihe i NE ulazi u specifikaciju
-  //   // =====================================================
-  //   if (req.user.role === "nurse") {
-  //     console.log("➡️ Sestra dodaje artikal — NE diram stanje!");
-
-  //     const usedArticle = await UsedArticles.create({
-  //       patient: patientId,
-  //       article: articleId,
-  //       priceAtTheTime: article.price,
-  //       amount,
-  //       createdBy: req.user._id,
-  //       roleUsed: req.user.role,
-  //     });
-
-  //     // Notifikacije (vlasnik + glavna sestra)
-  //     await createNotification(
-  //       patient.createdBy,
-  //       "article",
-  //       `${req.user.name} ${req.user.lastName} je dodala artikal pacijentu ${patient.name} ${patient.lastName}.`
-  //     );
-
-  //     const headNurse = await User.findOne({ role: "head_nurse" });
-  //     if (headNurse) {
-  //       await createNotification(
-  //         headNurse._id,
-  //         "article",
-  //         `Sestra ${req.user.name} je dodala artikal pacijentu ${patient.name}.`
-  //       );
-  //     }
-
-  //     return res.status(200).json({
-  //       success: true,
-  //       message: "Sestra je dodala artikal — stanje se NE umanjuje i NE ulazi u specifikaciju.",
-  //       usedArticle,
-  //     });
-  //   }
-
-  //   // =====================================================
-  //   // 🔴  B) ADMIN / VLASNIK — SKIDA SA ZALIHA + SPECIFIKACIJA
-  //   // =====================================================
-
-  //   const totalAvailable = article.familyQuantity + article.quantity;
-  //   if (totalAvailable < amount) {
-  //     return res.status(400).json({
-  //       success: false,
-  //       message: "Nedovoljno ukupno artikala na stanju",
-  //     });
-  //   }
-
-  //   let fromFamily = 0;
-  //   let fromStock = 0;
-
-  //   if (article.familyQuantity >= amount) {
-  //     fromFamily = amount;
-  //     article.familyQuantity -= amount;
-  //   } else {
-  //     fromFamily = article.familyQuantity;
-  //     fromStock = amount - fromFamily;
-
-  //     if (article.quantity < fromStock) {
-  //       return res.status(400).json({
-  //         success: false,
-  //         message: "Nema dovoljno artikala u magacinu",
-  //       });
-  //     }
-
-  //     article.familyQuantity = 0;
-  //     article.quantity -= fromStock;
-  //   }
-
-  //   await article.save();
-
-  //   // Upis u UsedArticles
-  //   const usedArticle = await UsedArticles.create({
-  //     patient: patientId,
-  //     article: articleId,
-  //     priceAtTheTime: article.price,
-  //     amount,
-  //     createdBy: req.user._id,
-  //     roleUsed: req.user.role,
-  //   });
-
-  //   // =====================================================
-  //   // 🟣 SPECIFIKACIJA — samo deo iz magacina
-  //   // =====================================================
-  //   if (fromStock > 0) {
-  //     const spec = await getActiveSpecification(patientId);
-
-  //     const cost = fromStock * article.price;
-
-  //     // -----------------------------------------------------
-  //     // 🔥 PROVERA DA LI VEĆ POSTOJI U SPECIFIKACIJI
-  //     // -----------------------------------------------------
-  //     const existingItem = spec.items.find(
-  //       (i) =>
-  //         i.category === "article" &&
-  //         i.name === article.name
-  //     );
-
-  //     if (existingItem) {
-  //       // 🔥 Update umesto dodavanja
-  //       existingItem.amount += fromStock;
-  //       existingItem.price += cost;
-  //     } else {
-  //       // ➕ Dodaj novi item
-  //       spec.items.push({
-  //         name: article.name,
-  //         category: "article",
-  //         amount: fromStock,
-  //         price: cost,
-  //         date: new Date(),
-  //       });
-  //     }
-
-  //     // Recalculate totalPrice
-  //     spec.totalPrice =
-  //       spec.items.reduce((sum, i) => sum + (i.price ?? 0), 0) +
-  //       (spec.extraCosts ?? 0);
-
-  //     await spec.save();
-  //   }
-
-  //   return res.status(200).json({ success: true, usedArticle });
-
-  // } catch (error) {
-  //   console.error("❌ addArticleToPatient FATAL ERROR:", error);
-  //   return res.status(500).json({ success: false, message: error.message });
-  // }
-
   try {
-    const {patientId, articleId, amount} = req.body;
-    const article = await Article.findById(articleId);
+    const { patientId, articleId, amount } = req.body;
+
     const patient = await Patient.findById(patientId);
-    const spec = await getActiveSpecification(patientId);
+    if (!patient) return res.status(404).json({ success: false, message: "Pacijent nije pronađen" });
 
-    if(!article) return res.status(404).json({success: false, message: "artikli nisu pronadjeni"})
-    if(!patient) return res.status(404).json({success: false, message: "pacijent nije pronadjen"})
-
-      const useAmount = Number(amount);
-      if(!useAmount || useAmount <= 0) {
-        return res.status(400).json({success: false, message:"Nije dodata kolicina"})
-
-      }
-
-      if(req.user.role === "nurse") {
-        const usedRecord = await UsedArticles.create({
-          patient: patientId,
-          article: articleId,
-          amount: useAmount,
-          familyAmount: 0,
-          homeAmount: 0,
-          fromFamily: false,
-          priceAtTheTime: article.price,
-          createdBy: req.user._id,
-          roleUsed: req.user.role,
-        })
-         return res.status(200).json({
-        success: true,
-        message: "Sestra je dodala artikal- stanje se ne menja",
-        usedRecord,
-        specification: spec
-      })
-    }
-       
-    let familyUsed = 0;
-    let homeUsed = 0;
-    
-    const patientArticle = await PatientArticle.findOne({
-      patient: patientId,
-      article: articleId,
-    })
-
-    if(patientArticle && patientArticle.quantity > 0) {
-      if(patientArticle.quantity >= useAmount) {
-        familyUsed = useAmount;
-        patientArticle.quantity -= useAmount;
-      }else {
-        familyUsed = patientArticle.quantity;
-        patientArticle.quantity = 0;
-        homeUsed = useAmount - familyUsed
-      }
-
-      await patientArticle.save()
-    }else{
-      homeUsed = useAmount
-    }
-
-    if(homeUsed > 0) {
-      if(article.quantity <homeUsed){
-        return res.status(400).json({
-          success: false,
-          message: "nedovoljno ovog artikla u domu"
-        })
-      }
-      article.quantity -= homeUsed;
-      recalcPackages(article);
-      await article.save()
-
-    
-    }
-
-    const usedRecord = await UsedArticles.create ({
-      patient: patientId,
-      article: articleId,
-      amount: useAmount,
-      familyAmount: familyUsed,
-      homeAmount: homeUsed,
-      fromFamily: familyUsed > 0,
-      priceAtTheTime: article.price,
-      createdBy: req.user._id,
-      roleUsed: req.user.role,
-    })
-
-    if(homeUsed === 0) {
-      return res.status(200).json({
-        success: true, 
-        message: "iskoriscen porodicni artikal",
-        usedRecord,
-        specification: spec,
-      })
-    }
-
-    const cost = homeUsed * article.price;
-
-    const existingItem = spec.items.find(
-      (i) => i.category === "articles" && i.name === article.name
-    )
-
-    if(existingItem){
-      existingItem.amount += homeUsed;
-      existingItem.price += cost;
-      existingItem.date = new Date()
-    }else {
-      spec.items.push({
-        name: article.name,
-        category: "articles",
-        amount: homeUsed,
-        price: cost,
-        date: new Date()
-      })
-    }
-
-    spec.totalPrice = 
-      spec.items.reduce((sum, i) => sum +(i.price ?? 0), 0)+
-      (spec.extraCosts ?? 0);
-
-      await spec.save();
-
-      const freshSpec = await getActiveSpecification(patientId);
-       return res.status(200).json({
-      success: true,
-      message: "Artikal dodat u specifikaciju.",
-      usedRecord,
-      specification: freshSpec,
+    const result = await consumeForPatient("article", {
+      patientId,
+      itemId: articleId,
+      amount,
+      user: req.user,
     });
 
-
+    return res.status(200).json({ success: true, ...result });
   } catch (error) {
-     console.error("useArticle error:", error);
-    return res.status(500).json({ success: false, message: error.message });
+    console.error("useArticle error:", error);
+    return res.status(error.status || 500).json({ success: false, message: error.message });
   }
 };
 
@@ -549,7 +288,8 @@ const getPatientStockArticles = async (req, res) => {
 
     
 
-    const formatted = patientArticles.map((pa) => ({
+    // Artikal je mogao biti obrisan iz šifarnika — takve zapise preskačemo
+    const formatted = patientArticles.filter((pa) => pa.article).map((pa) => ({
       _id: pa.article._id,
       name: pa.article.name,
       familyQuantity: pa.quantity,
@@ -559,10 +299,6 @@ const getPatientStockArticles = async (req, res) => {
       
     }) );
     
-    if(formatted.length === 0){
-      return res.status(404).json({success:false, message:"nema artikala za ovog pacijenta"})
-    }
-
     return res.status(200).json({
       success: true,
       message:"artikli pronadjeni",

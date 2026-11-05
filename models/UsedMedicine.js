@@ -8,6 +8,10 @@ const usedMedicineSchema = new mongoose.Schema(
     fromFamily: { type: Boolean, default: false }, // ako je porodica donela lek
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     priceAtTheTime:{ type: Number, required: true },
+    // Koliko je uzeto sa porodičnog, a koliko sa kućnog (domskog) stanja
+    familyAmount: { type: Number, default: 0 },
+    homeAmount: { type: Number, default: 0 },
+    roleUsed: { type: String },
   },
   { timestamps: true }
 );

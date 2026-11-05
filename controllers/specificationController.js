@@ -11,6 +11,7 @@ import {
 } from "../services/getOrCreateActiveSpecification.js";
 import GlobalSetting from "../models/GlobalSetting.js";
 import { nextPeriodAfter, normalizeStoredDay } from "../utils/dateUtils.js";
+import { MANAGER_ROLES, addExtraCharge, removeSpecItem } from "../services/specificationCharges.js";
 
 const getSpecification = async (req, res) => {
   try {
@@ -88,43 +89,31 @@ const activateExisting = async (req, res) => {
     return res.status(err.status || 500).json({ success: false, message: err.message });
   }
 };
-// ✅ DODAVANJE SMESTAJA I DODATNIH TROŠKOVA
+// ✅ DODAVANJE DODATNIH TROŠKOVA
 const addCostsToSpecification = async (req, res) => {
   try {
     const { id } = req.params;
     const { extraCostAmount, extraCostLabel } = req.body;
-    const amount = Number(extraCostAmount);
 
-    if (!Number.isFinite(amount) || amount <= 0) {
-      return res.status(400).json({ success: false, message: "Neispravan iznos troška." });
+    if (!MANAGER_ROLES.includes(req.user.role)) {
+      return res.status(403).json({ success: false, message: "Nemate dozvolu da menjate specifikaciju." });
     }
 
     const spec = await Specification.findById(id);
     if (!spec) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Specifikacija nije pronađena." });
+      return res.status(404).json({ success: false, message: "Specifikacija nije pronađena." });
     }
 
-    spec.items.push({
-      name: extraCostLabel || "Dodatni trošak",
-      category: "extra",
-      amount: 1,
-      price: amount,
-      date: new Date(),
+    const saved = await addExtraCharge(spec, {
+      label: extraCostLabel,
+      amount: Number(extraCostAmount),
+      user: req.user,
     });
 
-    spec.extraCosts = (spec.extraCosts || 0) + amount;
-    spec.totalPrice = (spec.totalPrice || 0) + amount;
-
-    await spec.save();
-
-    return res.json({ success: true, specification: spec });
+    return res.json({ success: true, specification: saved });
   } catch (err) {
-    console.error(err);
-    return res
-      .status(500)
-      .json({ success: false, message: err.message });
+    console.error("addCostsToSpecification error:", err);
+    return res.status(err.status || 500).json({ success: false, message: err.message });
   }
 };
 // controllers/specificationController.js (nastavak)
@@ -224,54 +213,28 @@ const getSpecificationById = async (req, res) => {
     return res.status(500).json({ success: false, message: err.message });
   }
 };
-// ✅ BRISANJE STAVKE IZ SPECIFIKACIJE
+// ✅ BRISANJE STAVKE IZ SPECIFIKACIJE (vraća stanje na lager i briše zapis o potrošnji)
 const deleteSpecificationItem = async (req, res) => {
   try {
     const { specId, itemId } = req.params;
 
-    const spec = await Specification.findById(specId);
-    if (!spec) {
-      return res.status(404).json({
-        success: false,
-        message: "Specifikacija nije pronađena",
-      });
+    if (!MANAGER_ROLES.includes(req.user.role)) {
+      return res.status(403).json({ success: false, message: "Nemate dozvolu da menjate specifikaciju." });
     }
 
-    const itemIndex = spec.items.findIndex(
-      (i) => i._id.toString() === itemId
-    );
-
-    if (itemIndex === -1) {
-      return res.status(404).json({
-        success: false,
-        message: "Stavka nije pronađena",
-      });
-    }
-
-    const removedItem = spec.items[itemIndex];
-
-    // ✅ smanji totalPrice
-    spec.totalPrice = Math.max(
-      0,
-      (spec.totalPrice || 0) - (removedItem.price || 0)
-    );
-
-    // ✅ ukloni stavku
-    spec.items.splice(itemIndex, 1);
-
-    await spec.save();
+    const { specification, fullyReverted } = await removeSpecItem(specId, itemId);
 
     return res.json({
       success: true,
-      message: "Stavka obrisana",
-      specification: spec,
+      message: fullyReverted
+        ? "Stavka obrisana."
+        : "Stavka obrisana. Ovo je starija stavka — stanje na lageru nije automatski vraćeno.",
+      fullyReverted,
+      specification,
     });
   } catch (err) {
     console.error("deleteSpecificationItem:", err);
-    return res.status(500).json({
-      success: false,
-      message: err.message,
-    });
+    return res.status(err.status || 500).json({ success: false, message: err.message });
   }
 };
 const calculatePreview = (req, res) => {

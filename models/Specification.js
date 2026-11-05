@@ -15,6 +15,8 @@ const specificationSchema = new mongoose.Schema({
           type: mongoose.Schema.Types.ObjectId,
           ref: "Combination",
         },
+      medicine: { type: mongoose.Schema.Types.ObjectId, ref: "Medicine" },
+      article: { type: mongoose.Schema.Types.ObjectId, ref: "Article" },
       analyses: [
         {
           _id: { type: mongoose.Schema.Types.ObjectId, ref: "Analysis" },
@@ -25,6 +27,19 @@ const specificationSchema = new mongoose.Schema({
       price: Number,
       amount: Number,
       date: Date,
+      // Pojedinačna dodavanja koja čine ovu stavku. Omogućavaju da se brisanjem
+      // stavke vrati stanje na lager i obriše zapis o potrošnji. Stare stavke
+      // (pre ovog polja) ga nemaju — njihovo brisanje samo uklanja trošak.
+      entries: [
+        {
+          usedRecord: { type: mongoose.Schema.Types.ObjectId },
+          homeAmount: { type: Number, default: 0 },
+          familyAmount: { type: Number, default: 0 },
+          price: { type: Number, default: 0 },
+          createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+          date: { type: Date, default: Date.now },
+        },
+      ],
     },
   ],
   totalPrice: { type: Number, default: 0 },
@@ -57,7 +72,10 @@ const specificationSchema = new mongoose.Schema({
   },
 
   createdAt: { type: Date, default: Date.now },
-});
+},
+// Svako čuvanje proverava verziju dokumenta — istovremene izmene iste
+// specifikacije ne mogu tiho da prepišu jedna drugu (vidi mutateSpec).
+{ optimisticConcurrency: true });
 
 const Specification = mongoose.model("Specification", specificationSchema);
 export default Specification;

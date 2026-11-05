@@ -3,7 +3,7 @@ import UsedMedicine from "../models/UsedMedicine.js";
 import Patient from "../models/Patient.js";
 import PatientMedicine from "../models/PatientMedicine.js";
 
-import { getActiveSpecification } from "../services/getOrCreateActiveSpecification.js";
+import { consumeForPatient } from "../services/specificationCharges.js";
 import { createNotification } from "../services/notificationService.js";
 
 /**
@@ -326,133 +326,20 @@ const useMedicine = async (req, res) => {
   try {
     const { patientId, medicineId, amount } = req.body;
 
-    const medicine = await Medicine.findById(medicineId);
     const patient = await Patient.findById(patientId);
-    const spec = await getActiveSpecification(patientId);
-
-    if (!medicine) return res.status(404).json({ success: false, message: "Lek nije pronađen" });
     if (!patient) return res.status(404).json({ success: false, message: "Pacijent nije pronađen" });
 
-    const useAmount = Number(amount);
-    if (!useAmount || useAmount <= 0) {
-      return res.status(400).json({ success: false, message: "Neispravna količina" });
-    }
-
-    if (req.user.role === "nurse") {
-      const usedRecord = await UsedMedicine.create({
-        patient: patientId,
-        medicine: medicineId,
-        amount: useAmount,
-        familyAmount: 0,
-        homeAmount: 0,
-        fromFamily: false,
-        priceAtTheTime: medicine.pricePerUnit,
-        createdBy: req.user._id,
-        roleUsed: req.user.role,
-      });
-
-      return res.status(200).json({
-        success: true,
-        message: "Sestra je dala lek — stanje se ne menja.",
-        usedRecord,
-        specification: spec,
-      });
-    }
-
-    let familyUsed = 0;
-    let homeUsed = 0;
-
-    const patientMedicine = await PatientMedicine.findOne({
-      patient: patientId,
-      medicine: medicineId,
+    const result = await consumeForPatient("medicine", {
+      patientId,
+      itemId: medicineId,
+      amount,
+      user: req.user,
     });
 
-    if (patientMedicine && patientMedicine.quantity > 0) {
-      if (patientMedicine.quantity >= useAmount) {
-        familyUsed = useAmount;
-        patientMedicine.quantity -= useAmount;
-      } else {
-        familyUsed = patientMedicine.quantity;
-        patientMedicine.quantity = 0;
-        homeUsed = useAmount - familyUsed;
-      }
-
-      await patientMedicine.save();
-    } else {
-      homeUsed = useAmount;
-    }
-
-    if (homeUsed > 0) {
-      if (medicine.quantity < homeUsed) {
-        return res.status(400).json({
-          success: false,
-          message: "Nedovoljno leka u domu",
-        });
-      }
-
-      medicine.quantity -= homeUsed;
-      recalcPackages(medicine);
-      await medicine.save();
-    }
-
-    const usedRecord = await UsedMedicine.create({
-      patient: patientId,
-      medicine: medicineId,
-      amount: useAmount,
-      familyAmount: familyUsed,
-      homeAmount: homeUsed,
-      fromFamily: familyUsed > 0,
-      priceAtTheTime: medicine.pricePerUnit,
-      createdBy: req.user._id,
-      roleUsed: req.user.role,
-    });
-
-    if (homeUsed === 0) {
-      return res.status(200).json({
-        success: true,
-        message: "Iskorišćen porodični lek.",
-        usedRecord,
-        specification: spec,
-      });
-    }
-
-    const cost = homeUsed * medicine.pricePerUnit;
-
-
-    const existingItem = spec.items.find(
-      (i) => i.category === "medicine" && i.name === medicine.name
-    );
-
-    if (existingItem) {
-      existingItem.amount += homeUsed;
-      existingItem.price += cost;
-      existingItem.date = new Date();
-    } else {
-      spec.items.push({
-        name: medicine.name,
-        category: "medicine",
-        amount: homeUsed,
-        price: cost,
-        date: new Date(),
-      });
-    }
-
-    spec.totalPrice =
-      spec.items.reduce((sum, i) => sum + (i.price ?? 0), 0) +
-      (spec.extraCosts ?? 0);
-
-    await spec.save();
-    const freshSpec = await getActiveSpecification(patientId);
-    return res.status(200).json({
-      success: true,
-      message: "Lek dodat u specifikaciju.",
-      usedRecord,
-      specification: freshSpec,
-    });
-
+    return res.status(200).json({ success: true, ...result });
   } catch (error) {
     console.error("useMedicine error:", error);
-    return res.status(500).json({ success: false, message: error.message });
+    return res.status(error.status || 500).json({ success: false, message: error.message });
   }
 };
 

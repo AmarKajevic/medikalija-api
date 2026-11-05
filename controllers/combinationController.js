@@ -3,7 +3,7 @@ import Combination from "../models/Combination.js";
 import CombinationGroup from "../models/CombinationGroup.js";
 import Specification from "../models/Specification.js";
 import UsedCombinations from "../models/UsedCombinations.js";
-import { getActiveSpecification } from "../services/getOrCreateActiveSpecification.js";
+import { addCombinationCharge } from "../services/specificationCharges.js";
 
 // Dodavanje nove kombinacije
 export const addCombination = async (req, res) => {
@@ -76,66 +76,12 @@ export const addCombinationToPatient = async (req, res) => {
       });
     }
 
-    const analysesSnapshot = combination.analyses.map(a => ({
-      _id: a._id,
-      name: a.name,
-      price: a.price
-    }));
+    const result = await addCombinationCharge({ patientId, combination, user: req.user });
 
-    const totalPriceAtTheTime = analysesSnapshot.reduce(
-      (sum, a) => sum + (a.price || 0),
-      0
-    );
-
-    const usedCombination = await UsedCombinations.create({
-      patient: patientId,
-      combination: combinationId,
-      analyses: analysesSnapshot,
-      totalPriceAtTheTime,
-      createdBy: req.user._id
-    });
-
-    // 🔹 uzmi spec
-    const spec = await getActiveSpecification(patientId);
-
-    const existingItem = spec.items.find(
-      item =>
-        item.category === "combination" &&
-        item.combination &&
-        item.combination.equals(combination._id)
-    );
-
-   if (existingItem) {
-  existingItem.amount = (existingItem.amount || 1) + 1;
-  existingItem.price += totalPriceAtTheTime;
-} else {
-  spec.items.push({
-    name: combination.name,
-    category: "combination",
-    combination: combination._id, // 🔴 OBAVEZNO ObjectId
-    analyses: analysesSnapshot,
-    price: totalPriceAtTheTime,
-    amount: 1,
-    date: new Date(),
-  });
-}
-spec.items.sort((a, b) => a.name.localeCompare(b.name, 'sr'));
-
-    // 🔹 recalculacija totala
-    spec.totalPrice =
-      spec.items.reduce((sum, i) => sum + (i.price ?? 0), 0) +
-      (spec.lodgingPrice ?? 0) +
-      (spec.extraCosts ?? 0);
-
-    await spec.save();
-
-    return res.status(201).json({
-      success: true,
-      usedCombination
-    });
-
+    return res.status(201).json({ success: true, ...result });
   } catch (error) {
-    return res.status(500).json({
+    console.error("addCombinationToPatient error:", error);
+    return res.status(error.status || 500).json({
       success: false,
       message: error.message
     });
