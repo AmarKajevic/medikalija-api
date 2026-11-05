@@ -1,5 +1,6 @@
 import Patient from "../models/Patient.js"
 import Specification from "../models/Specification.js";
+import { normalizeStoredDay, parseCalendarDay, sameDayQuery } from "../utils/dateUtils.js";
 
 const getPatients = async (req, res) => {
     try{
@@ -35,12 +36,20 @@ const addPatient = async(req, res) => {
 
     const { name, lastName, dateOfBirth, address, admissionDate, contactPerson } = req.body;
 
+    // Datumi se čuvaju kao kalendarski dan (UTC ponoć) — od dana prijema se
+    // računa mreža 30-dnevnih perioda specifikacija.
+    const admissionDay = parseCalendarDay(admissionDate);
+    const birthDay = parseCalendarDay(dateOfBirth);
+    if (!admissionDay || !birthDay) {
+      return res.status(400).json({ success: false, message: "Neispravan datum rođenja ili prijema" });
+    }
+
     const patient = await Patient.create({
       name,
       lastName,
-      dateOfBirth,
+      dateOfBirth: birthDay,
       address,
-      admissionDate,
+      admissionDate: admissionDay,
       contactPerson: contactPerson || "",
       createdBy: req.user._id,
     });
@@ -71,27 +80,42 @@ const dischargePatient = async (req, res) => {
     const { id } = req.params;
     const { dischargeDate } = req.body;
 
+    const dischargeDay = parseCalendarDay(dischargeDate);
+    if (!dischargeDay) {
+      return res.status(400).json({ success: false, message: "Neispravan datum otpusta." });
+    }
+
     const patient = await Patient.findById(id);
     if (!patient) {
       return res.status(404).json({ success: false, message: "Pacijent nije pronađen." });
     }
 
+    const admissionDay = normalizeStoredDay(patient.admissionDate);
+    if (admissionDay && dischargeDay < admissionDay) {
+      return res.status(400).json({ success: false, message: "Datum otpusta ne može biti pre datuma prijema." });
+    }
+
     // 🩺 Postavi datum otpusta
-    patient.dischargeDate = new Date(dischargeDate);
+    patient.dischargeDate = dischargeDay;
     await patient.save();
 
-    // 🔎 Pronađi aktivnu specifikaciju za pacijenta
-    const activeSpec = await Specification.findOne({
+    // 🔎 Specifikacija u koju pada dan otpusta (prednost ima aktivna). Ne
+    // oslanjamo se na "danas" jer otpust može biti unet retroaktivno.
+    const { $gte: dayFrom, $lt: dayTo } = sameDayQuery(dischargeDay);
+    const specToClose = await Specification.findOne({
       patientId: id,
-      endDate: { $gte: new Date() },
-    });
+      startDate: { $lt: dayTo },
+      endDate: { $gte: dayFrom },
+    }).sort({ isActive: -1, startDate: -1 });
 
-    if (activeSpec) {
+    if (specToClose && normalizeStoredDay(specToClose.endDate) > dischargeDay) {
       // ✂️ Prekini specifikaciju na dan otpusta
-      activeSpec.endDate = new Date(dischargeDate);
-      activeSpec.isActive = false;
-      await activeSpec.save();
+      specToClose.endDate = dischargeDay;
+      await specToClose.save();
     }
+
+    // Otpušten pacijent nema aktivnu specifikaciju
+    await Specification.updateMany({ patientId: id, isActive: true }, { $set: { isActive: false } });
 
     return res.json({
       success: true,

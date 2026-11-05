@@ -411,7 +411,7 @@ const addArticleToPatient = async (req, res) => {
           homeAmount: 0,
           fromFamily: false,
           priceAtTheTime: article.price,
-          reatedBy: req.user._id,
+          createdBy: req.user._id,
           roleUsed: req.user.role,
         })
          return res.status(200).json({

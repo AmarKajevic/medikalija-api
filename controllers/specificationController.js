@@ -1,8 +1,16 @@
 import mongoose from "mongoose";
 import Patient from "../models/Patient.js";
 import Specification from "../models/Specification.js"
-import { getActiveSpecification, activateSpecificationPeriod, activateExistingSpecification } from "../services/getOrCreateActiveSpecification.js";
+import {
+  getActiveSpecification,
+  activateSpecificationPeriod,
+  activateExistingSpecification,
+  activateNextSpecificationPeriod,
+  buildSpecificationSchedule,
+  futureScheduleHorizon,
+} from "../services/getOrCreateActiveSpecification.js";
 import GlobalSetting from "../models/GlobalSetting.js";
+import { nextPeriodAfter, normalizeStoredDay } from "../utils/dateUtils.js";
 
 const getSpecification = async (req, res) => {
   try {
@@ -47,6 +55,23 @@ const activatePeriod = async (req, res) => {
   }
 };
 
+// ✅ AKTIVIRANJE SLEDEĆEG PERIODA (nadovezuje se na trenutno aktivan, računa server)
+const activateNextPeriod = async (req, res) => {
+  try {
+    const { patientId } = req.params;
+
+    if (!["admin", "main-nurse"].includes(req.user.role)) {
+      return res.status(403).json({ success: false, message: "Nemate dozvolu da menjate period specifikacije" });
+    }
+
+    const spec = await activateNextSpecificationPeriod(patientId);
+    return res.json({ success: true, specification: spec });
+  } catch (err) {
+    console.error("activateNextPeriod error:", err);
+    return res.status(err.status || 500).json({ success: false, message: err.message });
+  }
+};
+
 // ✅ REAKTIVIRANJE POSTOJEĆEG PERIODA IZ ISTORIJE (po ID-u, bez nagađanja datuma)
 const activateExisting = async (req, res) => {
   try {
@@ -68,6 +93,11 @@ const addCostsToSpecification = async (req, res) => {
   try {
     const { id } = req.params;
     const { extraCostAmount, extraCostLabel } = req.body;
+    const amount = Number(extraCostAmount);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return res.status(400).json({ success: false, message: "Neispravan iznos troška." });
+    }
 
     const spec = await Specification.findById(id);
     if (!spec) {
@@ -76,22 +106,16 @@ const addCostsToSpecification = async (req, res) => {
         .json({ success: false, message: "Specifikacija nije pronađena." });
     }
 
-    let totalAdd = 0;
+    spec.items.push({
+      name: extraCostLabel || "Dodatni trošak",
+      category: "extra",
+      amount: 1,
+      price: amount,
+      date: new Date(),
+    });
 
-    if (extraCostAmount && extraCostAmount > 0) {
-      spec.items.push({
-        name: extraCostLabel || "Dodatni trošak",
-        category: "extra",
-        amount: 1,
-        price: extraCostAmount,
-        date: new Date(),
-      });
-
-      totalAdd += extraCostAmount;
-      spec.extraCosts = (spec.extraCosts || 0) + extraCostAmount;
-    }
-
-    spec.totalPrice += totalAdd;
+    spec.extraCosts = (spec.extraCosts || 0) + amount;
+    spec.totalPrice = (spec.totalPrice || 0) + amount;
 
     await spec.save();
 
@@ -131,12 +155,9 @@ const saveBillingForSpecification = async (req, res) => {
     const totalRSD = specTotalRSD + debtRSD + lodgingRSD;
     const totalEUR = specEUR + debtEUR + lodgingEUR;
 
-    // Računanje narednog perioda (30 dana od kraja specifikacije)
-    const currentEndDate = new Date(spec.endDate);
-    const nextPeriodStart = new Date(currentEndDate);
-    nextPeriodStart.setDate(nextPeriodStart.getDate() + 1);
-    const nextPeriodEnd = new Date(nextPeriodStart);
-    nextPeriodEnd.setDate(nextPeriodEnd.getDate() + 29);
+    // Naredni period: dan posle kraja specifikacije + 30 kalendarskih dana
+    const { startDate: nextPeriodStart, endDate: nextPeriodEnd } =
+      nextPeriodAfter(normalizeStoredDay(spec.endDate));
 
     spec.billing = {
       previousDebtEUR: debtEUR,
@@ -262,16 +283,17 @@ const calculatePreview = (req, res) => {
     middleExchangeRate
   } = req.body;
 
+  const specRSD = Number(specTotalRSD) || 0;
   const low = Number(lowerExchangeRate) || 0;
   const mid = Number(middleExchangeRate) || 0;
   const debtEUR = Number(previousDebtEUR) || 0;
   const lodgingEUR = Number(nextLodgingEUR) || 0;
 
-  const specEUR = low > 0 ? specTotalRSD / low : 0;
+  const specEUR = low > 0 ? specRSD / low : 0;
   const debtRSD = mid > 0 ? debtEUR * mid : 0;
   const lodgingRSD = mid > 0 ? lodgingEUR * mid : 0;
 
-  const totalRSD = specTotalRSD + debtRSD + lodgingRSD;
+  const totalRSD = specRSD + debtRSD + lodgingRSD;
   const totalEUR = specEUR + debtEUR + lodgingEUR;
 
   return res.json({
@@ -285,4 +307,36 @@ const calculatePreview = (req, res) => {
 
 
 
-export {getSpecification, activatePeriod, activateExisting, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}
+// 📅 RASPORED 30-DNEVNIH PERIODA (od prijema do 10 godina unapred)
+const getFutureSpecificationPeriods = async (req, res) => {
+  try {
+    const { patientId } = req.params;
+
+    const patient = await Patient.findById(patientId);
+    if (!patient) {
+      return res.status(404).json({ success: false, message: "Pacijent nije pronađen" });
+    }
+
+    const until = futureScheduleHorizon(patient.admissionDate);
+    const periods = buildSpecificationSchedule(patient.admissionDate, until);
+
+    return res.status(200).json({
+      success: true,
+      patient: {
+        id: patient._id,
+        name: patient.name,
+        lastName: patient.lastName,
+        admissionDate: normalizeStoredDay(patient.admissionDate),
+      },
+      periods,
+    });
+  } catch (error) {
+    console.error("Greška:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Greška pri generisanju budućih perioda",
+    });
+  }
+};
+
+export {getSpecification, activatePeriod, activateNextPeriod, activateExisting, getFutureSpecificationPeriods, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}

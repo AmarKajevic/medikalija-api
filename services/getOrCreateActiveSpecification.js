@@ -1,21 +1,53 @@
 import Specification from "../models/Specification.js";
 import Patient from "../models/Patient.js";
+import {
+  addYears,
+  diffInDays,
+  normalizeStoredDay,
+  nextPeriodAfter,
+  parseCalendarDay,
+  periodByIndex,
+  periodIndexForDay,
+  sameDayQuery,
+  today,
+} from "../utils/dateUtils.js";
 
-// Normalizuje na UTC ponoć na osnovu kalendarskih Y/M/D vrednosti ulaznog datuma,
-// bez zavisnosti od vremenske zone servera. `setHours()` resetuje u LOKALNOJ zoni,
-// pa bi npr. na serveru sa UTC+2 zonom pomerio "2026-09-05" (UTC ponoć) na
-// "2026-09-04T22:00:00.000Z" — što razbija tačno poređenje datuma pri traženju
-// postojeće specifikacije za isti period.
-function toUtcMidnight(dateInput) {
-  const d = new Date(dateInput);
-  if (isNaN(d.getTime())) return d; // ostaje Invalid Date, provereno kod pozivaoca
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+function httpError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+// Traži specifikaciju za tačan kalendarski opseg. Poređenje je tolerantno (±12h)
+// jer stari zapisi u bazi mogu biti sačuvani kao lokalna ponoć (22:00Z/23:00Z)
+// umesto kao UTC ponoć.
+function findSpecForRange(patientId, startDate, endDate) {
+  return Specification.findOne({
+    patientId,
+    startDate: sameDayQuery(startDate),
+    endDate: sameDayQuery(endDate),
+  });
+}
+
+// Vraća postojeću specifikaciju za opseg ili je kreira. Upsert je atomičan, pa
+// dva paralelna zahteva (npr. dve sestre istovremeno dodaju lek) ne prave
+// duplikat istog perioda.
+async function findOrCreateSpecForRange(patientId, startDate, endDate) {
+  const existing = await findSpecForRange(patientId, startDate, endDate);
+  if (existing) return existing;
+
+  return Specification.findOneAndUpdate(
+    { patientId, startDate, endDate },
+    // patientId/startDate/endDate se pri insertu preuzimaju iz filtera
+    { $setOnInsert: { items: [], totalPrice: 0, isActive: false } },
+    { new: true, upsert: true }
+  );
 }
 
 // Vraća period koji je admin eksplicitno označio kao aktivan (isActive: true).
 // Ako takav ne postoji (nov pacijent ili stari podaci bez flaga), samoispravljanje:
-// koristi se stara logika (period po admissionDate + "danas") i taj period se
-// markira kao aktivan, tako da nema potrebe za posebnom migracionom skriptom.
+// koristi se period po admissionDate + "danas" i taj period se markira kao
+// aktivan, tako da nema potrebe za posebnom migracionom skriptom.
 export async function getActiveSpecification(patientId) {
   const patient = await Patient.findById(patientId);
   if (!patient) return null;
@@ -24,10 +56,9 @@ export async function getActiveSpecification(patientId) {
   const existing = await Specification.findOne({ patientId, isActive: true });
   if (existing) return existing;
 
-  const fallback = await getOrCreateActiveSpecification(patientId);
+  const fallback = await getOrCreateActiveSpecification(patientId, patient);
   if (fallback) {
-    fallback.isActive = true;
-    await fallback.save();
+    return setActiveSpec(patientId, fallback);
   }
   return fallback;
 }
@@ -43,159 +74,96 @@ async function setActiveSpec(patientId, spec) {
   return spec;
 }
 
-// Kreira (ili, ako se ista sesija dva puta pozove sa istim opsegom, ponovo
-// koristi) NOVI period po ručno unetom opsegu datuma i postavlja ga kao aktivan.
-// Napomena: postojeće automatski kreirane specifikacije u bazi mogu imati
-// startDate/endDate izračunate starom logikom (lokalna vremenska zona servera
-// umešana u proračun preko admissionDate) — ova funkcija NE pokušava da ih
-// pogodi tačnim poklapanjem datuma. Za vraćanje na POSTOJEĆI raniji period
-// koristi se `activateExistingSpecification` po ID-u (bez nagađanja datuma).
+// Kreira (ili ponovo koristi postojeći) period po ručno unetom opsegu datuma
+// i postavlja ga kao aktivan. Prihvata "YYYY-MM-DD" ili ISO datum sa vremenom.
 export async function activateSpecificationPeriod(patientId, startDate, endDate) {
   const patient = await Patient.findById(patientId);
-  if (!patient) {
-    const err = new Error("Pacijent nije pronađen");
-    err.status = 404;
-    throw err;
+  if (!patient) throw httpError(404, "Pacijent nije pronađen");
+
+  const start = parseCalendarDay(startDate);
+  const end = parseCalendarDay(endDate);
+
+  if (!start || !end || end < start) {
+    throw httpError(400, "Neispravan opseg datuma");
   }
 
-  const start = toUtcMidnight(startDate);
-  const end = toUtcMidnight(endDate);
-
-  if (isNaN(start.getTime()) || isNaN(end.getTime()) || end < start) {
-    const err = new Error("Neispravan opseg datuma");
-    err.status = 400;
-    throw err;
-  }
-
-  let spec = await Specification.findOne({ patientId, startDate: start, endDate: end });
-
-  if (!spec) {
-    spec = await Specification.create({
-      patientId,
-      items: [],
-      totalPrice: 0,
-      startDate: start,
-      endDate: end,
-      isActive: false,
-    });
-  }
-
+  const spec = await findOrCreateSpecForRange(patientId, start, end);
   return setActiveSpec(patientId, spec);
 }
 
-// Reaktivira POSTOJEĆU specifikaciju po ID-u (npr. iz istorije) — bez ikakvog
-// poređenja/računanja datuma, pa nema rizika od neuklapanja usled legacy
-// razlika u tome kako su stari periodi izračunati.
+// Aktivira period koji se nadovezuje na trenutno aktivan (dan posle njegovog
+// kraja + 30 dana). Računa se na serveru da frontend ne bi zavisio od
+// vremenske zone browsera.
+export async function activateNextSpecificationPeriod(patientId) {
+  const active = await getActiveSpecification(patientId);
+  if (!active) {
+    throw httpError(409, "Pacijent nema aktivnu specifikaciju (otpušten ili ne postoji)");
+  }
+
+  const { startDate, endDate } = nextPeriodAfter(normalizeStoredDay(active.endDate));
+  const spec = await findOrCreateSpecForRange(patientId, startDate, endDate);
+  return setActiveSpec(patientId, spec);
+}
+
+// Reaktivira POSTOJEĆU specifikaciju po ID-u (npr. iz istorije), bez ikakvog
+// poređenja ili računanja datuma.
 export async function activateExistingSpecification(patientId, specId) {
   const spec = await Specification.findOne({ _id: specId, patientId });
-  if (!spec) {
-    const err = new Error("Specifikacija nije pronađena");
-    err.status = 404;
-    throw err;
-  }
+  if (!spec) throw httpError(404, "Specifikacija nije pronađena");
   return setActiveSpec(patientId, spec);
 }
 
-export async function getOrCreateActiveSpecification(patientId) {
-  const patient = await Patient.findById(patientId);
+// Period (iz mreže 30-dnevnih perioda od dana prijema) u koji pada današnji dan.
+export async function getOrCreateActiveSpecification(patientId, patientDoc = null) {
+  const patient = patientDoc || (await Patient.findById(patientId));
   if (!patient) return null;
 
-  // ❌ Ako pacijent ima ručni otpust → nikad ne pravimo novu specifikaciju
+  // Ako pacijent ima ručni otpust → nikad ne pravimo novu specifikaciju
   if (patient.dischargeDate) return null;
 
-  const admissionDate = new Date(patient.admissionDate);
+  const admissionDay = normalizeStoredDay(patient.admissionDate);
+  if (!admissionDay) return null;
 
-  // ✅ Normalizujemo TODAY na početak dana
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const index = periodIndexForDay(admissionDay, today());
+  const { startDate, endDate } = periodByIndex(admissionDay, index);
 
-  // === Korak 1: izračunaj broj dana od prijema ===
-  const diffDays = Math.floor(
-    (today - admissionDate) / (1000 * 60 * 60 * 24)
-  );
-
-  // === Korak 2: odredi koji je trenutno 30-dnevni period ===
-  const periodIndex = Math.floor(diffDays / 30);
-
-  // === Korak 3: izračunaj startDate za ovaj period ===
-  const startDate = new Date(admissionDate);
-  startDate.setDate(startDate.getDate() + periodIndex * 30);
-
-  // === Korak 4: izračunaj endDate (30 dana uključujući poslednji dan) ===
-  const endDate = new Date(startDate);
-  endDate.setDate(endDate.getDate() + 29);
-
-  // === Korak 5: potraži postojecu specifikaciju za ovaj period ===
-  let spec = await Specification.findOne({ patientId, startDate, endDate });
-
-  // === Korak 6: Ako ne postoji – kreiraj je ===
-  if (!spec) {
-    spec = await Specification.create({
-      patientId,
-      items: [],
-      totalPrice: 0,
-      startDate,
-      endDate,
-    });
-  
-  
-  
-  }
-
-  return spec;
+  return findOrCreateSpecForRange(patientId, startDate, endDate);
 }
 
+// Raspored 30-dnevnih perioda od dana prijema do `untilDay` (uključivo).
+// Svaki period ima tačno 30 kalendarskih dana; 29. februar u prestupnoj
+// godini je običan dan u periodu, pa se raspored nikad ne "pomera".
+export function buildSpecificationSchedule(admissionDate, untilDay, currentDay = today()) {
+  const admissionDay = normalizeStoredDay(admissionDate);
+  if (!admissionDay || untilDay < admissionDay) return [];
 
-export const getFutureSpecificationPeriods = async (req, res) => {
-  try {
-    const { patientId } = req.params;
+  const currentIndex = diffInDays(admissionDay, currentDay) >= 0
+    ? periodIndexForDay(admissionDay, currentDay)
+    : -1;
 
-    const patient = await Patient.findById(patientId);
-    if (!patient) {
-      return res.status(404).json({ success: false, message: "Pacijent nije pronađen" });
-    }
+  const periods = [];
+  for (let i = 0; ; i++) {
+    const { startDate, endDate } = periodByIndex(admissionDay, i);
+    if (startDate > untilDay) break;
 
-    const admissionDate = new Date(patient.admissionDate);
-
-    // === 5 GODINA U DANIMA ===
-    const tenYears = 10 * 365;
-
-    const periods = [];
-    let currentStart = new Date(admissionDate);
-
-    // Generate periods while within 5 years from admission
-    for (let i = 0; i < Math.floor(tenYears / 30); i++) {
-      const startDate = new Date(currentStart);
-      const endDate = new Date(startDate);
-      endDate.setDate(endDate.getDate() + 29); // 30 dana
-
-      periods.push({
-        index: i + 1,
-        startDate,
-        endDate,
-      });
-
-      // Pomeri start za sledeći ciklus
-      currentStart.setDate(currentStart.getDate() + 30);
-    }
-
-    return res.status(200).json({
-      success: true,
-      patient: {
-        id: patient._id,
-        name: patient.name,
-        lastName: patient.lastName,
-      },
-      periods,
-    });
-
-  } catch (error) {
-    console.error("Greška:", error);
-    return res.status(500).json({
-      success: false,
-      message: "Greška pri generisanju budućih perioda",
+    periods.push({
+      index: i + 1,
+      startDate,
+      endDate,
+      isPast: i < currentIndex,
+      isCurrent: i === currentIndex,
     });
   }
-};
+  return periods;
+}
 
+export const FUTURE_SCHEDULE_YEARS = 10;
 
+// Datum do kog se prikazuju budući periodi: 10 kalendarskih godina od danas
+// (sa prestupnim godinama), a najmanje 10 godina od prijema.
+export function futureScheduleHorizon(admissionDate, currentDay = today()) {
+  const admissionDay = normalizeStoredDay(admissionDate);
+  const fromToday = addYears(currentDay, FUTURE_SCHEDULE_YEARS);
+  const fromAdmission = admissionDay ? addYears(admissionDay, FUTURE_SCHEDULE_YEARS) : fromToday;
+  return fromToday > fromAdmission ? fromToday : fromAdmission;
+}
