@@ -21,6 +21,7 @@ import type { UserAttrs } from "../models/User.js";
 import { MANAGER_ROLES, isManagerRole } from "../middleware/requireRole.js";
 import { httpError } from "../utils/errors.js";
 import { getActiveSpecification } from "./getOrCreateActiveSpecification.js";
+import NurseEntry from "../models/NurseEntry.js";
 
 export { MANAGER_ROLES, httpError };
 
@@ -221,11 +222,12 @@ interface ConsumeInput {
   itemId: Id;
   amount: unknown;
   user: Actor;
+  /** Ko je stvarno dao lek/artikal (sestra čiji unos uprava prihvata); podrazumevano `user` */
+  performedBy?: { _id: Types.ObjectId; role: string };
 }
 
-// Daje lek/artikal pacijentu. Za sestre se samo beleži potrošnja (stanje i
-// specifikaciju menja glavna sestra/admin, kao i do sada).
-export async function consumeForPatient(kindName: ConsumableKindName, { patientId, itemId, amount, user }: ConsumeInput) {
+// Daje lek/artikal pacijentu: prvo porodično stanje, ostatak sa stanja doma u specifikaciju.
+export async function consumeForPatient(kindName: ConsumableKindName, { patientId, itemId, amount, user, performedBy }: ConsumeInput) {
   const kind = KINDS[kindName];
   const useAmount = round2(amount);
   if (!useAmount || useAmount <= 0) throw httpError(400, "Neispravna količina.");
@@ -235,24 +237,10 @@ export async function consumeForPatient(kindName: ConsumableKindName, { patientI
 
   const unitPrice = Number(item[kind.priceField]) || 0;
 
-  if (!isManagerRole(user.role)) {
-    const usedRecord = await kind.Used.create({
-      patient: patientId,
-      [kind.ref]: itemId,
-      amount: useAmount,
-      fromFamily: false,
-      priceAtTheTime: unitPrice,
-      createdBy: user._id,
-      roleUsed: user.role,
-    });
-    return {
-      usedRecord,
-      specification: await getActiveSpecification(patientId),
-      familyUsed: 0,
-      homeUsed: 0,
-      message: "Zabeleženo. Stanje i specifikaciju ažurira glavna sestra.",
-    };
-  }
+  // Sestre ne menjaju stanje ni specifikaciju: njihov unos ide na odobrenje
+  // (services/nurseEntries.ts), a ovu funkciju poziva uprava kad ga prihvati.
+  if (!isManagerRole(user.role)) throw httpError(403, "Stanje i specifikaciju menja samo uprava.");
+  const author = performedBy ?? user;
 
   // Specifikacija se proverava PRE bilo kakve promene stanja.
   const spec = await requireActiveSpecification(patientId);
@@ -288,8 +276,8 @@ export async function consumeForPatient(kindName: ConsumableKindName, { patientI
       homeAmount: homeUsed,
       fromFamily: familyUsed > 0,
       priceAtTheTime: unitPrice,
-      createdBy: user._id,
-      roleUsed: user.role,
+      createdBy: author._id,
+      roleUsed: author.role,
     });
     undo.push(() => kind.Used.deleteOne({ _id: usedRecord._id }));
 
@@ -304,7 +292,7 @@ export async function consumeForPatient(kindName: ConsumableKindName, { patientI
           name: item.name,
           amount: homeUsed,
           price,
-          entry: { usedRecord: usedRecord._id, homeAmount: homeUsed, familyAmount: familyUsed, price, createdBy: user._id },
+          entry: { usedRecord: usedRecord._id, homeAmount: homeUsed, familyAmount: familyUsed, price, createdBy: author._id },
         })
       ));
     }
@@ -386,6 +374,21 @@ export async function addExtraCharge(spec: SpecificationDoc, { label, amount, us
   return saved;
 }
 
+// Naplata usluge nege (cena usluge × broj puta) kao zasebna stavka. Vraća i id
+// stavke, da bi se unos sestre vratio na odobrenje ako se stavka obriše.
+export async function addServiceCharge(
+  spec: SpecificationDoc,
+  { name, times, unitPrice, createdBy }: { name: string; times: number; unitPrice: number; createdBy: Types.ObjectId }
+) {
+  const price = round2(times * unitPrice);
+  if (!(price > 0)) throw httpError(400, "Usluga nema cenu.");
+  const { spec: saved, result: itemId } = await mutateSpec(spec, (s) => {
+    s.items.push({ name, category: "extra", amount: times, price, date: new Date(), entries: [{ price, createdBy }] });
+    return s.items[s.items.length - 1]!._id;
+  });
+  return { specification: saved, itemId, price };
+}
+
 // Uklanja stavku i poništava sve što je ona izazvala. Stavka se PRVO uklanja iz
 // specifikacije (sa proverom verzije), pa se tek onda vraća stanje — tako dva
 // istovremena brisanja iste stavke ne mogu da vrate stanje dva puta.
@@ -425,5 +428,30 @@ export async function removeSpecItem(specId: Id, itemId: Id) {
     fullyReverted = true;
   }
 
+  await reopenNurseEntries(usedIds, removed._id);
   return { specification: saved, fullyReverted };
+}
+
+// Unos sestre čija je naplata obrisana iz specifikacije vraća se na odobrenje.
+// Usluga koja je naplatila i artikal i cenu vraća se tek kad nestanu oba dela.
+async function reopenNurseEntries(usedIds: unknown[], specItemId: unknown) {
+  const linked = { status: "accepted", $or: [{ usedRecords: { $in: usedIds } }, { specItems: specItemId }] };
+  const affected = await NurseEntry.find(linked, { _id: 1 });
+  if (affected.length === 0) return;
+  const ids = affected.map((e) => e._id);
+  await NurseEntry.updateMany({ _id: { $in: ids } }, { $pull: { usedRecords: { $in: usedIds }, specItems: specItemId } });
+  await NurseEntry.updateMany(
+    { _id: { $in: ids }, usedRecords: { $size: 0 }, specItems: { $size: 0 } },
+    {
+      $set: {
+        status: "pending",
+        reviewedBy: null,
+        reviewedAt: null,
+        acceptedAmount: null,
+        chargedPrice: 0,
+        specification: null,
+        rejectReason: "",
+      },
+    }
+  );
 }

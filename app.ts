@@ -21,6 +21,8 @@ import medicineReserveRouter from "./routes/medicineReserve.js";
 import exchangeRatesRouter from "./routes/exchangeRate.js"
 import dashboardRouter from "./routes/dashboard.js"
 import settingsRouter from "./routes/settings.js"
+import nurseEntriesRouter from "./routes/nurseEntries.js"
+import careTasksRouter from "./routes/careTasks.js"
 
 // Express aplikacija bez pokretanja servera — koriste je index.ts i testovi.
 const app = express();
@@ -76,5 +78,7 @@ app.use("/api/medicine-reserve", medicineReserveRouter);
 app.use("/api/exchange-rates", exchangeRatesRouter);
 app.use("/api/dashboard", dashboardRouter);
 app.use("/api/settings", settingsRouter);
+app.use("/api/nurse-entries", nurseEntriesRouter);
+app.use("/api/care-tasks", careTasksRouter);
 
 export default app;
