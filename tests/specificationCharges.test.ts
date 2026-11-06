@@ -84,12 +84,23 @@ describe("davanje leka", () => {
     assert.equal(await UsedMedicine.countDocuments(), 0);
   });
 
-  test("sestra samo beleži, bez promene stanja i specifikacije", async () => {
-    const res = await use(3, nurse);
-    assert.equal(res.homeUsed, 0);
+  test("sestra ne menja stanje ni specifikaciju (njen unos ide na odobrenje, vidi nurseEntries.test)", async () => {
+    await assert.rejects(use(3, nurse), (err: { status?: number }) => err.status === 403);
     assert.equal(must(await Medicine.findById(medicine._id)).quantity, 10);
     assert.equal((await activeSpec()).items.length, 0);
-    assert.equal(await UsedMedicine.countDocuments({ roleUsed: "nurse" }), 1);
+    assert.equal(await UsedMedicine.countDocuments(), 0);
+  });
+
+  test("prihvaćen unos sestre: autor potrošnje je sestra, ne uprava", async () => {
+    const res = await consumeForPatient("medicine", {
+      patientId: patient._id,
+      itemId: medicine._id,
+      amount: 1,
+      user: admin,
+      performedBy: { _id: nurse._id, role: "nurse" },
+    });
+    assert.equal(String(res.usedRecord.createdBy), String(nurse._id));
+    assert.equal(res.usedRecord.roleUsed, "nurse");
   });
 
   test("ponovljeno davanje se spaja u jednu stavku", async () => {

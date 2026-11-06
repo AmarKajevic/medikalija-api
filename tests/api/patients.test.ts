@@ -53,6 +53,13 @@ describe("POST /api/patient/addPatient", () => {
 });
 
 describe("PATCH /api/patient/:id/discharge", () => {
+  test("medicinska sestra ne može da otpusti pacijenta", async () => {
+    const patient = await createPatient();
+    const res = await request(app).patch(`/api/patient/${patient._id}/discharge`).set(authHeader(nurse)).send({ dischargeDate: "2026-05-01" });
+    assert.equal(res.status, 403);
+    assert.equal(must(await Patient.findById(patient._id)).dischargeDate, null);
+  });
+
   test("otpust pre prijema → 400", async () => {
     const patient = await createPatient({ admissionDate: new Date("2026-05-10T00:00:00Z") });
     const res = await request(app).patch(`/api/patient/${patient._id}/discharge`).set(authHeader(admin)).send({ dischargeDate: "2026-05-01" });

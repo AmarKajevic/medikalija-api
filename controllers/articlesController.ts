@@ -4,6 +4,8 @@ import PatientArticle from "../models/PatientArticle.js";
 import UsedArticles from "../models/UsedArticles.js";
 
 import { consumeForPatient } from "../services/specificationCharges.js";
+import { createEntries } from "../services/nurseEntries.js";
+import { isManagerRole } from "../middleware/requireRole.js";
 import type { Request, Response } from "express";
 import { errorMessage, statusOf } from "../utils/errors.js";
 import { param } from "../utils/http.js";
@@ -249,6 +251,12 @@ const addArticleToPatient = async (req: Request, res: Response) => {
 
     const patient = await Patient.findById(patientId);
     if (!patient) return res.status(404).json({ success: false, message: "Pacijent nije pronađen" });
+
+    // Sestre: unos ide upravi na odobrenje (services/nurseEntries.ts)
+    if (!isManagerRole(req.user.role)) {
+      const { entries } = await createEntries(patientId, [{ type: "article", itemId: articleId, amount }], req.user);
+      return res.status(200).json({ success: true, message: "Poslato upravi na odobrenje.", entries, specification: null, familyUsed: 0, homeUsed: 0 });
+    }
 
     const result = await consumeForPatient("article", {
       patientId,
