@@ -24,13 +24,16 @@ router.get("/", authMiddleware, async (req: Request, res: Response) => {
     const variants = [...new Set([q, toLatin(q), toCyrillic(toLatin(q))])].map(escapeRegex);
     const regex = new RegExp(variants.join("|"), "i");
 
+    // Socijalni radnik vidi samo pacijente
+    const patientsOnly = req.user.role === "social-worker";
+
     // 🟦 LEKOVI – sada vraća quantity i familyQuantity
-    const medicines = await Medicine.find({ name: regex })
+    const medicines = patientsOnly ? [] : await Medicine.find({ name: regex })
       .limit(10)
       .select("_id name quantity familyQuantity");
 
     // 🟩 ARTIKLI
-    const articles = await Articles.find({ name: regex })
+    const articles = patientsOnly ? [] : await Articles.find({ name: regex })
       .limit(10)
       .select("_id name quantity familyQuantity");
 

@@ -101,3 +101,24 @@ describe("dijagnoze", () => {
     assert.equal(res.status, 404);
   });
 });
+
+
+describe("učinak rada (beleške sestara)", () => {
+  test("filter po periodu i autor sa prezimenom", async () => {
+    const patient = await createPatient();
+    const post = (description: string) =>
+      request(app).post("/api/diagnosis/addDiagnosis").set(authHeader(nurse)).send({ patientId: String(patient._id), description });
+    assert.equal((await post("Previjanje rane")).status, 201);
+    await post("Merenje pritiska");
+    const Diagnosis = (await import("../../models/Diagnosis.js")).default;
+    // createdAt je u Mongoose-u nepromenljiv — datum se menja direktno u kolekciji
+    await Diagnosis.collection.updateOne({ description: "Previjanje rane" }, { $set: { createdAt: new Date("2026-01-05T10:00:00Z") } });
+
+    const all = await request(app).get(`/api/diagnosis/${patient._id}`).set(authHeader(admin));
+    assert.equal(all.body.diagnosis.length, 2);
+    assert.equal(all.body.diagnosis[0].createdBy.lastName, nurse.lastName);
+
+    const january = await request(app).get(`/api/diagnosis/${patient._id}?from=2026-01-01T00:00:00Z&to=2026-02-01T00:00:00Z`).set(authHeader(admin));
+    assert.deepEqual(january.body.diagnosis.map((d: { description: string }) => d.description), ["Previjanje rane"]);
+  });
+});
