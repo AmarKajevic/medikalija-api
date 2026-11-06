@@ -5,6 +5,7 @@ import Articles from "../models/Articles.js"; // ✔ ispravljeno ime modela
 import Patient from "../models/Patient.js";
 import authMiddleware from "../middleware/authMiddleware.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
+import { toCyrillic, toLatin } from "../utils/script.js";
 import { errorMessage } from "../utils/errors.js";
 
 const router = express.Router();
@@ -18,7 +19,10 @@ router.get("/", authMiddleware, async (req: Request, res: Response) => {
       return res.json({ success: true, results: [] });
     }
 
-    const regex = new RegExp(escapeRegex(query.slice(0, 100)), "i");
+    // Isti upit u oba pisma: podaci mogu biti uneti latinicom ili ćirilicom
+    const q = query.slice(0, 100);
+    const variants = [...new Set([q, toLatin(q), toCyrillic(toLatin(q))])].map(escapeRegex);
+    const regex = new RegExp(variants.join("|"), "i");
 
     // 🟦 LEKOVI – sada vraća quantity i familyQuantity
     const medicines = await Medicine.find({ name: regex })

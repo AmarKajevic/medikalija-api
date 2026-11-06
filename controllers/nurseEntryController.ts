@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import mongoose from "mongoose";
-import NurseEntry, { ENTRY_STATUSES, type EntryStatus } from "../models/NurseEntry.js";
+import NurseEntry, { ENTRY_STATUSES, ENTRY_TYPES, type EntryStatus, type EntryType } from "../models/NurseEntry.js";
 import { isManagerRole } from "../middleware/requireRole.js";
 import { errorMessage, statusOf } from "../utils/errors.js";
 import { param } from "../utils/http.js";
@@ -34,7 +34,7 @@ export const create = async (req: Request, res: Response) => {
 // GET /api/nurse-entries?patientId=&status=pending,accepted&mine=1&from=&to=&limit=
 export const list = async (req: Request, res: Response) => {
   try {
-    const { patientId, status, mine, from, to } = req.query as Record<string, string | undefined>;
+    const { patientId, status, mine, from, to, createdBy, type } = req.query as Record<string, string | undefined>;
     const manager = isManagerRole(req.user.role);
     if (!manager && !patientId && mine !== "1") {
       return res.status(403).json({ success: false, message: "Izaberite pacijenta." });
@@ -46,6 +46,15 @@ export const list = async (req: Request, res: Response) => {
       filter.patient = patientId;
     }
     if (mine === "1") filter.createdBy = req.user._id;
+    else if (createdBy) {
+      if (!manager) return res.status(403).json({ success: false, message: "Nedovoljno privilegija." });
+      if (!mongoose.isValidObjectId(createdBy)) return res.status(400).json({ success: false, message: "Neispravan korisnik." });
+      filter.createdBy = createdBy;
+    }
+    if (type) {
+      const types = type.split(",").filter((t) => ENTRY_TYPES.includes(t as EntryType));
+      if (types.length) filter.type = { $in: types };
+    }
     if (status) {
       const statuses = status.split(",").filter((s): s is EntryStatus => ENTRY_STATUSES.includes(s as EntryStatus));
       // "processing" se prikazuje kao da još čeka
@@ -56,7 +65,7 @@ export const list = async (req: Request, res: Response) => {
     if (to && !Number.isNaN(Date.parse(to))) range.$lte = new Date(to);
     if (Object.keys(range).length) filter.performedAt = range;
 
-    const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 500);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 2000);
     const entries = await populate(NurseEntry.find(filter).sort({ performedAt: -1 }).limit(limit));
     res.json({ success: true, entries });
   } catch (err) {

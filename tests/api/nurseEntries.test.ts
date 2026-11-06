@@ -123,6 +123,22 @@ describe("unos sestre", () => {
   });
 });
 
+describe("dnevnik nege (uprava)", () => {
+  test("filter po sestri, vrsti i periodu; sestra ne može da gleda tuđe", async () => {
+    const task = await CareTask.create({ name: "Kupanje" });
+    const med = await Medicine.create({ name: "Andol", pricePerUnit: 50, quantity: 10 });
+    await submit(nurse, [{ type: "care", itemId: String(task._id) }, { type: "medicine", itemId: String(med._id), amount: 1 }]);
+    await submit(otherNurse, [{ type: "care", itemId: String(task._id), performedAt: new Date(Date.now() - 3 * 86_400_000).toISOString() }]);
+
+    const get = (q: string, user: UserDoc = admin) => request(app).get(`/api/nurse-entries?${q}`).set(authHeader(user));
+    assert.equal((await get(`createdBy=${nurse._id}`)).body.entries.length, 2);
+    assert.equal((await get(`createdBy=${nurse._id}&type=care`)).body.entries.length, 1);
+    assert.equal((await get(`type=care&from=${new Date(Date.now() - 86_400_000).toISOString()}`)).body.entries.length, 1);
+    assert.equal((await get("type=care")).body.entries.length, 2);
+    assert.equal((await get(`patientId=${pid()}&createdBy=${nurse._id}`, otherNurse)).status, 403);
+  });
+});
+
 describe("odobravanje", () => {
   test("prihvatanje: prvo porodično stanje, ostatak u specifikaciju; autor ostaje sestra", async () => {
     const diaper = await Article.create({ name: "Pelene", price: 85, quantity: 100 });
