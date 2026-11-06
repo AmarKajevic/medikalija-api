@@ -28,6 +28,15 @@ describe("pretraga", () => {
     assert.equal(res.status, 401);
   });
 
+  test("pretraga u oba pisma", async () => {
+    await createPatient({ name: "Milica", lastName: "Živković" });
+    await createPatient({ name: "Љубица", lastName: "Петровић" });
+    const search = async (q: string) =>
+      (await request(app).get(`/api/search?q=${encodeURIComponent(q)}`).set(authHeader(nurse))).body.results.map((r: { name: string }) => r.name);
+    assert.deepEqual(await search("Милица"), ["Milica Živković"]);
+    assert.deepEqual(await search("ljub"), ["Љубица Петровић"]);
+  });
+
   test("regex znakovi se tretiraju doslovno", async () => {
     await createPatient({ name: "Milica" });
     await Medicine.create({ name: "Andol", quantity: 1 });
