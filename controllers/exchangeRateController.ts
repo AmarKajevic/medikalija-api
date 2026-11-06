@@ -18,7 +18,11 @@ export const getExchangeRates = async (_req: Request, res: Response) => {
 
 export const updateExchangeRates = async (req: Request, res: Response) => {
   try {
-    const { lowerExchangeRate, middleExchangeRate } = req.body;
+    const { lowerExchangeRate, middleExchangeRate } = req.body ?? {};
+    const invalid = [lowerExchangeRate, middleExchangeRate].some(
+      (v) => v !== undefined && !(typeof v === "number" && Number.isFinite(v) && v >= 0)
+    );
+    if (invalid) return res.status(400).json({ success: false, message: "Kurs mora biti pozitivan broj." });
     let settings = await GlobalSetting.findOne();
     if (!settings) {
       settings = new GlobalSetting();

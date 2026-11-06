@@ -20,11 +20,15 @@ import searchRouter from "./routes/search.js"
 import medicineReserveRouter from "./routes/medicineReserve.js";
 import exchangeRatesRouter from "./routes/exchangeRate.js"
 import dashboardRouter from "./routes/dashboard.js"
+import settingsRouter from "./routes/settings.js"
 
 // Express aplikacija bez pokretanja servera — koriste je index.ts i testovi.
 const app = express();
 app.disable("x-powered-by");
 
+// Podešavanja ustanove nose logo (data URL), pa im treba veće ograničenje tela.
+// Parser za tu rutu ide prvi; opšti parser posle toga preskače već pročitano telo.
+app.use("/api/settings", express.json({ limit: "1mb" }));
 app.use(express.json());
 app.use(cookieParser());
 
@@ -71,5 +75,6 @@ app.use("/api/search", searchRouter);
 app.use("/api/medicine-reserve", medicineReserveRouter);
 app.use("/api/exchange-rates", exchangeRatesRouter);
 app.use("/api/dashboard", dashboardRouter);
+app.use("/api/settings", settingsRouter);
 
 export default app;
