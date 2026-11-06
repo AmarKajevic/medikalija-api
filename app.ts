@@ -23,6 +23,8 @@ import dashboardRouter from "./routes/dashboard.js"
 import settingsRouter from "./routes/settings.js"
 import nurseEntriesRouter from "./routes/nurseEntries.js"
 import careTasksRouter from "./routes/careTasks.js"
+import medicalReportsRouter from "./routes/medicalReports.js"
+import socialNotesRouter from "./routes/socialNotes.js"
 
 // Express aplikacija bez pokretanja servera — koriste je index.ts i testovi.
 const app = express();
@@ -80,5 +82,7 @@ app.use("/api/dashboard", dashboardRouter);
 app.use("/api/settings", settingsRouter);
 app.use("/api/nurse-entries", nurseEntriesRouter);
 app.use("/api/care-tasks", careTasksRouter);
+app.use("/api/medical-reports", medicalReportsRouter);
+app.use("/api/social-notes", socialNotesRouter);
 
 export default app;

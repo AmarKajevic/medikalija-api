@@ -55,7 +55,14 @@ const addDiagnosis = async (req: Request, res: Response) => {
 const getDiagnosis = async (req: Request, res: Response) => {
     const patientId = param(req, "patientId");
     try {
-        const diagnosis = await Diagnosis.find({patient: patientId}).populate("createdBy", "name role").sort({ createdAt: -1 });
+        // Opciono samo unosi iz perioda (npr. period specifikacije): ?from=ISO&to=ISO
+        const filter: Record<string, unknown> = { patient: patientId };
+        const range: Record<string, Date> = {};
+        const { from, to } = req.query as Record<string, string | undefined>;
+        if (from && !Number.isNaN(Date.parse(from))) range.$gte = new Date(from);
+        if (to && !Number.isNaN(Date.parse(to))) range.$lt = new Date(to);
+        if (Object.keys(range).length) filter.createdAt = range;
+        const diagnosis = await Diagnosis.find(filter).populate("createdBy", "name lastName role").sort({ createdAt: -1 });
         return res.status(200).json({success: true, diagnosis})
     } catch (error) {
         console.log(error)

@@ -4,6 +4,7 @@ import { errorMessage, httpError, statusOf } from "../utils/errors.js";
 import { param } from "../utils/http.js";
 import { DAY_MS } from "../utils/dateUtils.js";
 import { hasOccurrenceAt, listOccurrences, parseEventInput } from "../services/calendarEvents.js";
+import { isManagerRole } from "../middleware/requireRole.js";
 
 const fail = (res: Response, err: unknown) => res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
 
@@ -12,6 +13,13 @@ const parseInstant = (v: unknown, name: string) => {
   if (Number.isNaN(d.getTime())) throw httpError(400, `Neispravan parametar "${name}".`);
   return d;
 };
+
+// Uprava menja sve; ostali samo događaje koje su sami zakazali
+function assertCanModify(req: Request, event: { userId: unknown }) {
+  if (!isManagerRole(req.user.role) && String(event.userId) !== String(req.user._id)) {
+    throw httpError(403, "Možete da menjate samo termine koje ste vi zakazali.");
+  }
+}
 
 async function populated(id: unknown) {
   return CalendarEvent.findById(id).populate("patient", "name lastName").populate("userId", "name lastName");
@@ -50,6 +58,7 @@ export const updateEvent = async (req: Request, res: Response) => {
     const id = param(req, "id");
     const existing = await CalendarEvent.findById(id).catch(() => null);
     if (!existing) return res.status(404).json({ success: false, message: "Događaj nije pronađen." });
+    assertCanModify(req, existing);
     const input = await parseEventInput(req.body ?? {});
 
     if (req.body?.scope === "occurrence") {
@@ -87,6 +96,7 @@ export const deleteEvent = async (req: Request, res: Response) => {
     const id = param(req, "id");
     const existing = await CalendarEvent.findById(id).catch(() => null);
     if (!existing) return res.status(404).json({ success: false, message: "Događaj nije pronađen." });
+    assertCanModify(req, existing);
 
     if (req.query.occurrence) {
       const occurrenceStart = parseInstant(req.query.occurrence, "occurrence");

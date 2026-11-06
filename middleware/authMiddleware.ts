@@ -2,6 +2,7 @@ import jwt from "jsonwebtoken";
 import type { NextFunction, Request, Response } from "express";
 import User from "../models/User.js";
 import { requireEnv } from "../utils/env.js";
+import { allowedByScope } from "./roleScope.js";
 
 interface AccessTokenPayload {
   _id: string;
@@ -25,6 +26,10 @@ const authMiddleware = async (req: Request, res: Response, next: NextFunction) =
     const user = await User.findById(decoded._id).select("-passwordHash");
     if (!user) {
       return res.status(401).json({ success: false, message: "Invalid token" });
+    }
+
+    if (!allowedByScope(user.role, req)) {
+      return res.status(403).json({ success: false, message: "Nemate pristup ovim podacima." });
     }
 
     req.user = user;
