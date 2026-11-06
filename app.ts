@@ -1,6 +1,8 @@
 import express from "express"
 import cors from 'cors'
 import cookieParser from "cookie-parser"
+import type { NextFunction, Request, Response } from "express"
+import connectToDatabase from "./db/db.js"
 import authRouther from "./routes/auth.js"
 import patientRouter from "./routes/patient.js"
 import diagnosisRouter from "./routes/diganosis.js"
@@ -37,6 +39,19 @@ app.use(
     credentials: true,
   })
 );
+
+// Na Vercelu (serverless) aplikacija se poziva direktno, bez index.ts startServer(),
+// pa se konekcija obezbeđuje pre svakog zahteva. Posle prve je odmah spremna (keš u db.ts).
+// Stoji POSLE cors-a: i odgovor sa greškom mora imati CORS zaglavlja.
+app.use(async (_req: Request, res: Response, next: NextFunction) => {
+  try {
+    await connectToDatabase();
+    next();
+  } catch (error) {
+    console.error("Baza nije dostupna:", error);
+    res.status(503).json({ success: false, message: "Baza podataka trenutno nije dostupna. Pokušajte ponovo." });
+  }
+});
 
 // ===== ROUTES =====
 app.use('/api/auth', authRouther)
