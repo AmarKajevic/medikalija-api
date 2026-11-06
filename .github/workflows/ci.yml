@@ -18,8 +18,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  syntax:
-    name: Syntax check
+  typecheck:
+    name: Typecheck
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -32,8 +32,7 @@ jobs:
 
       - run: npm ci
 
-      - name: node --check
-        run: git ls-files '*.js' | xargs -n1 node --check
+      - run: npm run typecheck
 
   test:
     name: Tests (TZ=${{ matrix.tz }})
@@ -69,7 +68,7 @@ jobs:
   ci-ok:
     name: CI OK
     if: always()
-    needs: [syntax, test]
+    needs: [typecheck, test]
     runs-on: ubuntu-latest
     steps:
       - name: Svi poslovi moraju da prođu
