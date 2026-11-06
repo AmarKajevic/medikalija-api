@@ -4,7 +4,7 @@ Backend REST API for **Medikalija** — a resident and staff management system f
 
 ## Tech stack
 
-- **Node.js** + **Express 5**
+- **TypeScript** (strict) on **Node.js** + **Express 5** — run with `tsx`, compiled by `@vercel/node` on deploy
 - **MongoDB** with **Mongoose**
 - **JWT** access/refresh tokens (httpOnly refresh cookie, rotation + reuse detection) with **bcrypt** password hashing
 - Deployed on **Vercel**
@@ -23,19 +23,23 @@ Backend REST API for **Medikalija** — a resident and staff management system f
 ## Project structure
 
 ```
+app.ts         Express app (routes, CORS) — imported by index.ts and by tests
+index.ts       entry point: loads .env, connects to MongoDB, starts the server
 controllers/   route handlers, one file per resource
-models/        Mongoose schemas
+models/        Mongoose schemas (types inferred from schemas; populated shapes in models/populated.ts)
 routes/        Express routers, mounted under /api/<resource>
-middleware/     authMiddleware (JWT verification)
-services/      shared business logic (e.g. specification period resolution)
-db/            MongoDB connection setup
+middleware/    authMiddleware (JWT), requireRole (admin/main-nurse guards)
+services/      business logic: specification periods, charges & stock, activity feed
+utils/         dates (calendar days, 30-day periods), errors, env, regex escaping
+types/         Express request augmentation (req.user)
+tests/         node:test — unit, service and API (supertest) tests on in-memory MongoDB
 ```
 
 ## Getting started
 
 ### Prerequisites
 
-- Node.js 18+
+- Node.js 22+
 - A MongoDB database (e.g. MongoDB Atlas)
 
 ### Setup
@@ -43,8 +47,17 @@ db/            MongoDB connection setup
 ```bash
 npm install
 cp .env.example .env   # then fill in real values
-npm start
+npm run dev            # tsx watch
 ```
+
+### Scripts
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Start the API with hot reload (`tsx watch`) |
+| `npm run typecheck` | Strict TypeScript check (`tsc --noEmit`) |
+| `npm test` | All tests (unit, service, API) against an in-memory MongoDB |
+| `npm run normalize-dates` | One-off data migration (dry-run; add `-- --apply` to write) |
 
 ### Environment variables
 
