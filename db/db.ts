@@ -9,6 +9,11 @@ export default async function connectToDatabase(): Promise<void> {
   const mongoUri = process.env.MONGODB_URL;
   if (!mongoUri) throw new Error("MONGODB_URL nije definisan u .env!");
 
+  // Ako je veza pukla (npr. Atlas zatvorio konekciju na "toploj" Vercel funkciji),
+  // staro obećanje je već ispunjeno, ali konekcije nema — pravi se nova.
+  const { readyState } = mongoose.connection;
+  if (readyState === 0 || readyState === 3) connecting = null;
+
   connecting ??= mongoose.connect(mongoUri, {
     bufferCommands: false,
     serverSelectionTimeoutMS: 5000,
