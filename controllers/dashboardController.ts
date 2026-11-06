@@ -1,7 +1,7 @@
 import Patient from "../models/Patient.js";
 import User, { ACTIVE_ROLES } from "../models/User.js";
 import Medicine from "../models/Medicine.js";
-import CalendarEvent from "../models/CalendarEvent.js";
+import { listOccurrences } from "../services/calendarEvents.js";
 import Notification from "../models/Notification.js";
 import { isManagerRole } from "../middleware/requireRole.js";
 import { loadActivity } from "../services/activityFeed.js";
@@ -17,9 +17,8 @@ export const getStats = async (req: Request, res: Response) => {
 
     const [activePatients, upcomingEvents, unreadNotifications] = await Promise.all([
       Patient.countDocuments({ dischargeDate: null }),
-      CalendarEvent.find({ start: { $gte: now, $lte: in7Days } })
-        .sort({ start: 1 })
-        .limit(5),
+      // Uključuje i događaje koji su već počeli a još traju, i termine iz ponavljanja
+      listOccurrences({ from: now, to: in7Days }).then((list) => list.slice(0, 5)),
       Notification.countDocuments({ userId: req.user._id, isRead: false }),
     ]);
 

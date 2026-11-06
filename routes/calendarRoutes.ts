@@ -1,17 +1,16 @@
 import express from "express";
-import {
-  getAllEvents,
-  createEvent,
-  updateEvent,
-  deleteEvent,
-} from "../controllers/calendarController.js";
+import { getEvents, createEvent, updateEvent, deleteEvent } from "../controllers/calendarController.js";
 import authMiddleware from "../middleware/authMiddleware.js";
+import { requireManager, requireRole } from "../middleware/requireRole.js";
 
 const router = express.Router();
 
-router.get("/",authMiddleware, getAllEvents);
-router.post("/",authMiddleware, createEvent);
-router.put("/:id",authMiddleware, updateEvent);
-router.delete("/:id",authMiddleware, deleteEvent);
+// Pregled ima celo osoblje (sestre vide termine pacijenata); menja samo uprava
+router.use(authMiddleware, requireRole("admin", "main-nurse", "nurse", "doctor"));
+
+router.get("/", getEvents);
+router.post("/", requireManager, createEvent);
+router.put("/:id", requireManager, updateEvent);
+router.delete("/:id", requireManager, deleteEvent);
 
 export default router;
