@@ -1,7 +1,7 @@
 import express from "express"
 import authMiddleware from "../middleware/authMiddleware.js"
 import { requireManager } from "../middleware/requireRole.js"
-import { getBillingPeriod, activatePeriod, activateNextPeriod, activateExisting, addCostsToSpecification, calculatePreview, deleteSpecificationItem, getFutureSpecificationPeriods, getSpecification, getSpecificationById, getSpecificationHistory, saveBillingForSpecification } from "../controllers/specificationController.js"
+import { getBillingPeriod, getPastPeriods, openPeriod, activatePeriod, activateNextPeriod, activateExisting, addCostsToSpecification, calculatePreview, deleteSpecificationItem, getFutureSpecificationPeriods, getSpecification, getSpecificationById, getSpecificationHistory, saveBillingForSpecification } from "../controllers/specificationController.js"
 
 const router = express.Router()
 
@@ -9,6 +9,8 @@ const router = express.Router()
 router.get("/:patientId", authMiddleware, getSpecification)
 // Period specifikacije (pre aktivnog) — u njemu se uglavnom pravi obračun
 router.get("/:patientId/billing-period", authMiddleware, requireManager, getBillingPeriod)
+router.get("/:patientId/past-periods", authMiddleware, requireManager, getPastPeriods)
+router.post("/:patientId/periods", authMiddleware, requireManager, openPeriod)
 router.post("/:patientId/activate", authMiddleware, activatePeriod)
 router.post("/:patientId/activate-next", authMiddleware, activateNextPeriod)
 router.post("/:patientId/activate/:specId", authMiddleware, activateExisting)

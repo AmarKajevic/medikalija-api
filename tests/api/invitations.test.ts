@@ -8,6 +8,8 @@ import User from "../../models/User.js";
 import Token from "../../models/Token.js";
 import { setGoogleVerifier } from "../../services/auth/google.js";
 import { ensureUserIndexes } from "../../services/auth/indexes.js";
+import nodemailer from "nodemailer";
+import { setMailTransport } from "../../utils/mailer.js";
 import { authHeader, createUser, must, useTestDatabase, type UserDoc } from "../helpers/setup.js";
 
 useTestDatabase();
@@ -111,6 +113,45 @@ describe("slanje linka mejlom", () => {
     assert.equal(res.status, 503);
     assert.match(res.body.message, /nije podešeno/);
     assert.equal((await request(app).post("/api/auth/links/send").set(authHeader(mainNurse)).send({ url: body.invite.url, email: "ana@dom.rs" })).status, 403);
+  });
+
+  describe("sa Gmail nalogom doma", () => {
+    const sent: { from: string; to: string; subject: string; text: string }[] = [];
+    beforeEach(() => {
+      sent.length = 0;
+      process.env.GMAIL_USER = "dommedikalija@gmail.com";
+      process.env.GMAIL_APP_PASSWORD = "abcd efgh ijkl mnop";
+      // Umesto prave veze sa Gmail-om: poruka se samo zapiše
+      const transport = nodemailer.createTransport({ jsonTransport: true });
+      const original = transport.sendMail.bind(transport);
+      transport.sendMail = (async (mail: { from: string; to: string; subject: string; text: string }) => {
+        sent.push(mail);
+        return original(mail);
+      }) as typeof transport.sendMail;
+      setMailTransport(transport);
+    });
+    afterEach(() => {
+      delete process.env.GMAIL_USER;
+      delete process.env.GMAIL_APP_PASSWORD;
+      setMailTransport(null);
+    });
+
+    test("pozivnica stiže sa adrese doma, sa linkom", async () => {
+      assert.equal((await request(app).get("/api/auth/config")).body.emailEnabled, true);
+      const { body } = await invite({ name: "Ana", lastName: "Anić", email: "ana@dom.rs", role: "nurse" });
+      assert.equal(body.invite.emailSent, true);
+      assert.equal(sent.length, 1);
+      assert.equal(sent[0]!.from, '"Dom Medikalija" <dommedikalija@gmail.com>');
+      assert.equal(sent[0]!.to, "ana@dom.rs");
+      assert.ok(sent[0]!.text.includes(body.invite.url));
+    });
+
+    test("link poslat na drugu adresu iz dijaloga", async () => {
+      const { body } = await invite({ name: "Ana", lastName: "Anić", username: "ana.a", role: "nurse" });
+      const res = await request(app).post("/api/auth/links/send").set(authHeader(admin)).send({ url: body.invite.url, email: "ana.licni@gmail.com" });
+      assert.equal(res.status, 200);
+      assert.equal(sent[sent.length - 1]?.to, "ana.licni@gmail.com");
+    });
   });
 });
 
