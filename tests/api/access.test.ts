@@ -28,6 +28,20 @@ describe("pretraga", () => {
     assert.equal(res.status, 401);
   });
 
+  test("pretraga po počecima reči, bez kvačica i nezavisno od redosleda reči", async () => {
+    await createPatient({ name: "Milica", lastName: "Jovanović" });
+    await createPatient({ name: "Kamila", lastName: "Živković" });
+    await Medicine.create({ name: "Andol 100mg", quantity: 1 });
+    const search = async (q: string) =>
+      (await request(app).get(`/api/search?q=${encodeURIComponent(q)}`).set(authHeader(nurse))).body.results.map((r: { name: string }) => r.name);
+    assert.deepEqual(await search("mil"), ["Milica Jovanović"], "ne nalazi 'Ka-mil-a'");
+    assert.deepEqual(await search("an"), ["Andol 100mg"], "ne nalazi 'Jov-an-ović'");
+    assert.deepEqual(await search("zivk"), ["Kamila Živković"], "bez kvačica");
+    assert.deepEqual(await search("jov mil"), ["Milica Jovanović"], "redosled reči nije bitan");
+    assert.deepEqual(await search("100"), ["Andol 100mg"]);
+    assert.deepEqual(await search("mil kam"), [], "obe reči moraju da se nađu");
+  });
+
   test("pretraga u oba pisma", async () => {
     await createPatient({ name: "Milica", lastName: "Živković" });
     await createPatient({ name: "Љубица", lastName: "Петровић" });
