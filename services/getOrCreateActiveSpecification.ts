@@ -11,14 +11,12 @@ type DayInput = Date | string | number | null | undefined;
 import {
   addDays,
   addYears,
+  diffInDays,
   calendarDayInZone,
   SPEC_PERIOD_DAYS,
-  diffInDays,
   normalizeStoredDay,
   nextPeriodAfter,
   parseCalendarDay,
-  periodByIndex,
-  periodIndexForDay,
   sameDayQuery,
   today,
 } from "../utils/dateUtils.js";
@@ -48,6 +46,62 @@ async function findOrCreateSpecForRange(patientId: Id, startDate: Date, endDate:
     { $setOnInsert: { items: [], totalPrice: 0, isActive: false } },
     { new: true, upsert: true }
   );
+}
+
+// ---------- Lanac perioda ----------
+// Svaki period počinje dan posle kraja prethodnog. Postojeći zapisi (i ručno uneti,
+// npr. skraćen period 02.09–25.09) važe tačno kako su uneti; praznine između njih
+// popunjavaju se periodima od 30 dana. Tako ručna izmena pomera sve što sledi
+// (posle 25.09. sledeći period počinje 26.09.), umesto fiksne mreže od dana prijema.
+export interface ChainPeriod {
+  startDate: Date;
+  endDate: Date;
+  spec: SpecificationDoc | null;
+}
+
+interface DatedSpec {
+  spec: SpecificationDoc;
+  start: Date;
+  end: Date;
+}
+
+const dated = (specs: SpecificationDoc[]): DatedSpec[] =>
+  specs
+    .map((spec) => ({ spec, start: normalizeStoredDay(spec.startDate), end: normalizeStoredDay(spec.endDate) }))
+    .filter((x): x is DatedSpec => !!x.start && !!x.end && x.end >= x.start)
+    .sort((a, b) => a.start.getTime() - b.start.getTime() || a.end.getTime() - b.end.getTime());
+
+/** Lanac od prijema (ili najranijeg zapisa) do `untilDay`; `skipped` = zapisi koji se preklapaju sa lancem */
+export function buildPeriodChain(admission: Date | null, specs: SpecificationDoc[], untilDay: Date): { periods: ChainPeriod[]; skipped: SpecificationDoc[] } {
+  const records = dated(specs);
+  const first = records[0]?.start;
+  let cursor = admission && first ? (first < admission ? first : admission) : (admission ?? first);
+  const periods: ChainPeriod[] = [];
+  const skipped: SpecificationDoc[] = [];
+  if (!cursor) return { periods, skipped };
+
+  let i = 0;
+  while (cursor <= untilDay) {
+    while (i < records.length && records[i]!.end < cursor) skipped.push(records[i++]!.spec);
+    const next = records[i];
+    if (next && next.start <= cursor) {
+      periods.push({ startDate: next.start, endDate: next.end, spec: next.spec });
+      cursor = addDays(next.end, 1);
+      i++;
+      continue;
+    }
+    let end = addDays(cursor, SPEC_PERIOD_DAYS - 1);
+    if (next && end >= next.start) end = addDays(next.start, -1);
+    periods.push({ startDate: cursor, endDate: end, spec: null });
+    cursor = addDays(end, 1);
+  }
+  return { periods, skipped };
+}
+
+async function loadPeriodChain(patientId: Id, untilDay: Date, patientDoc?: PatientDoc | null) {
+  const patient = patientDoc ?? (await Patient.findById(patientId));
+  const specs = await Specification.find({ patientId });
+  return buildPeriodChain(normalizeStoredDay(patient?.admissionDate), specs, untilDay);
 }
 
 // Vraća period koji je admin eksplicitno označio kao aktivan (isActive: true).
@@ -125,7 +179,7 @@ export async function activateExistingSpecification(patientId: Id, specId: Id): 
 
 // Period specifikacije: period neposredno pre aktivnog — poslednji koji je istekao.
 // Specifikacija se uglavnom obračunava kad period istekne, pa uprava najčešće radi
-// u ovom periodu. Ako zapis ne postoji, pravi se po mreži od 30 dana (ne pre prijema).
+// u ovom periodu. Ako zapis ne postoji, pravi se po lancu perioda (ne pre prijema).
 export async function getBillingPeriodSpecification(patientId: Id, activeSpec?: SpecificationDoc | null): Promise<SpecificationDoc | null> {
   const active = activeSpec === undefined ? await getActiveSpecification(patientId) : activeSpec;
   if (!active) return null;
@@ -136,11 +190,11 @@ export async function getBillingPeriodSpecification(patientId: Id, activeSpec?: 
   const existing = await Specification.findOne({ patientId, _id: { $ne: active._id }, endDate: sameDayQuery(end) }).sort({ startDate: -1 });
   if (existing) return existing;
 
-  const patient = await Patient.findById(patientId);
-  const admission = normalizeStoredDay(patient?.admissionDate);
-  if (!admission || end < admission) return null; // aktivan je prvi period
-  const gridStart = addDays(end, -(SPEC_PERIOD_DAYS - 1));
-  return findOrCreateSpecForRange(patientId, gridStart < admission ? admission : gridStart, end);
+  // Inače: period iz lanca koji se završava dan pre aktivnog
+  const { periods } = await loadPeriodChain(patientId, end);
+  const last = periods[periods.length - 1];
+  if (!last || last.spec?._id.equals(active._id)) return null; // aktivan je prvi period
+  return last.spec ?? findOrCreateSpecForRange(patientId, last.startDate, last.endDate > end ? end : last.endDate);
 }
 
 const inRange = (spec: SpecificationDoc, day: Date) => {
@@ -194,37 +248,25 @@ export async function getOrCreateActiveSpecification(patientId: Id, patientDoc: 
   const admissionDay = normalizeStoredDay(patient.admissionDate);
   if (!admissionDay) return null;
 
-  const index = periodIndexForDay(admissionDay, today());
-  const { startDate, endDate } = periodByIndex(admissionDay, index);
-
-  return findOrCreateSpecForRange(patientId, startDate, endDate);
+  const { periods } = await loadPeriodChain(patientId, today(), patient);
+  const current = periods[periods.length - 1];
+  if (!current) return null;
+  return current.spec ?? findOrCreateSpecForRange(patientId, current.startDate, current.endDate);
 }
 
 // Raspored 30-dnevnih perioda od dana prijema do `untilDay` (uključivo).
 // Svaki period ima tačno 30 kalendarskih dana; 29. februar u prestupnoj
 // godini je običan dan u periodu, pa se raspored nikad ne "pomera".
-export function buildSpecificationSchedule(admissionDate: DayInput, untilDay: Date, currentDay: Date = today()) {
-  const admissionDay = normalizeStoredDay(admissionDate);
-  if (!admissionDay || untilDay < admissionDay) return [];
-
-  const currentIndex = diffInDays(admissionDay, currentDay) >= 0
-    ? periodIndexForDay(admissionDay, currentDay)
-    : -1;
-
-  const periods = [];
-  for (let i = 0; ; i++) {
-    const { startDate, endDate } = periodByIndex(admissionDay, i);
-    if (startDate > untilDay) break;
-
-    periods.push({
-      index: i + 1,
-      startDate,
-      endDate,
-      isPast: i < currentIndex,
-      isCurrent: i === currentIndex,
-    });
-  }
-  return periods;
+// Raspored perioda do `untilDay` po lancu (postojeći zapisi pacijenta pomeraju ono što sledi)
+export function buildSpecificationSchedule(admissionDate: DayInput, untilDay: Date, currentDay: Date = today(), specs: SpecificationDoc[] = []) {
+  const { periods } = buildPeriodChain(normalizeStoredDay(admissionDate), specs, untilDay);
+  return periods.map((p, i) => ({
+    index: i + 1,
+    startDate: p.startDate,
+    endDate: p.endDate,
+    isPast: p.endDate < currentDay,
+    isCurrent: p.startDate <= currentDay && currentDay <= p.endDate,
+  }));
 }
 
 export const FUTURE_SCHEDULE_YEARS = 10;
@@ -247,37 +289,32 @@ export interface PastPeriod {
   totalPrice: number;
 }
 
-// Svi raniji periodi pacijenta, od prijema do aktivnog perioda, od najnovijeg ka najstarijem.
-// Postojeći zapisi (i ručno napravljeni) imaju prednost; praznine se popunjavaju
-// periodima od 30 dana iz mreže od dana prijema.
+// Svi raniji periodi pacijenta, od prijema do aktivnog perioda, od najnovijeg ka najstarijem
+// (po lancu perioda: ručno uneti datumi pomeraju sve što sledi).
 export async function listPastPeriods(patientId: Id): Promise<PastPeriod[]> {
   const patient = await Patient.findById(patientId);
   if (!patient) throw httpError(404, "Pacijent nije pronađen");
-  const admission = normalizeStoredDay(patient.admissionDate);
   const active = patient.dischargeDate ? null : await getActiveSpecification(patientId);
   // Granica: početak aktivnog perioda; otpušten pacijent — dan posle otpusta
   const limit = normalizeStoredDay(active?.startDate) ?? addDays(normalizeStoredDay(patient.dischargeDate) ?? today(), 1);
 
-  const specs = await Specification.find({ patientId, ...(active ? { _id: { $ne: active._id } } : {}) });
-  const existing = specs
-    .map((s) => ({ s, start: normalizeStoredDay(s.startDate), end: normalizeStoredDay(s.endDate) }))
-    .filter((x): x is { s: SpecificationDoc; start: Date; end: Date } => !!x.start && !!x.end && x.start < limit);
-
-  const result: PastPeriod[] = existing.map(({ s, start, end }) => ({
-    startDate: start,
-    endDate: end,
-    specificationId: String(s._id),
-    itemsCount: s.items.length,
-    totalPrice: s.totalPrice ?? 0,
-  }));
-
-  if (admission) {
-    const lastDay = addDays(limit, -1);
-    for (const p of buildSpecificationSchedule(admission, lastDay)) {
-      const end = p.endDate > lastDay ? lastDay : p.endDate;
-      const overlaps = existing.some((x) => p.startDate <= x.end && end >= x.start);
-      if (!overlaps) result.push({ startDate: p.startDate, endDate: end, specificationId: null, itemsCount: 0, totalPrice: 0 });
-    }
+  const { periods, skipped } = await loadPeriodChain(patientId, addDays(limit, -1), patient);
+  const isActive = (spec: SpecificationDoc | null) => !!active && !!spec && spec._id.equals(active._id);
+  const result: PastPeriod[] = periods
+    .filter((p) => p.startDate < limit && !isActive(p.spec))
+    .map((p) => ({
+      startDate: p.startDate,
+      endDate: p.endDate,
+      specificationId: p.spec ? String(p.spec._id) : null,
+      itemsCount: p.spec?.items.length ?? 0,
+      totalPrice: p.spec?.totalPrice ?? 0,
+    }));
+  // Zapisi koji se preklapaju sa lancem (stari podaci) se ne kriju
+  for (const spec of skipped) {
+    const start = normalizeStoredDay(spec.startDate);
+    const end = normalizeStoredDay(spec.endDate);
+    if (start && end && start < limit && !isActive(spec))
+      result.push({ startDate: start, endDate: end, specificationId: String(spec._id), itemsCount: spec.items.length, totalPrice: spec.totalPrice ?? 0 });
   }
   return result.sort((a, b) => b.startDate.getTime() - a.startDate.getTime());
 }
@@ -294,4 +331,64 @@ export async function openPastPeriod(patientId: Id, startDate: unknown, endDate:
   const activeStart = normalizeStoredDay(active?.startDate);
   if (activeStart && start >= activeStart) throw httpError(409, "Izaberite period pre aktivnog.");
   return findOrCreateSpecForRange(patientId, start, end);
+}
+
+const fmtDay = (d: Date) => `${String(d.getUTCDate()).padStart(2, "0")}.${String(d.getUTCMonth() + 1).padStart(2, "0")}.${d.getUTCFullYear()}.`;
+
+// Ručna izmena datuma perioda (npr. 02.09–01.10 → 02.09–25.09).
+//  - periodi koji se nadovezuju iza njega pomeraju se za istu razliku, pa sledeći
+//    počinje dan posle novog kraja (26.09.), a dužine im ostaju iste
+//  - prethodni period koji se završavao dan pre starog početka prati novi početak
+//  - prazan period koji bi se preklopio se uklanja; period sa stavkama se ne dira (greška)
+export async function changeSpecificationDates(patientId: Id, specId: unknown, startDate: unknown, endDate: unknown): Promise<SpecificationDoc> {
+  if (!Types.ObjectId.isValid(String(specId))) throw httpError(400, "Neispravan period.");
+  const start = parseCalendarDay(startDate);
+  const end = parseCalendarDay(endDate);
+  if (!start || !end || end < start) throw httpError(400, "Neispravan opseg datuma");
+
+  const all = dated(await Specification.find({ patientId }));
+  const target = all.find((x) => x.spec._id.equals(String(specId)));
+  if (!target) throw httpError(404, "Specifikacija nije pronađena");
+
+  const changes = new Map<string, { spec: SpecificationDoc; start: Date; end: Date }>();
+  changes.set(String(target.spec._id), { spec: target.spec, start, end });
+
+  // Periodi koji se nadovezuju iza (lanac bez rupa) pomeraju se za razliku u kraju
+  const shift = diffInDays(target.end, end);
+  if (shift !== 0) {
+    let prevEnd = target.end;
+    for (;;) {
+      const next = all.find((x) => !changes.has(String(x.spec._id)) && x.start.getTime() === addDays(prevEnd, 1).getTime());
+      if (!next) break;
+      changes.set(String(next.spec._id), { spec: next.spec, start: addDays(next.start, shift), end: addDays(next.end, shift) });
+      prevEnd = next.end;
+    }
+  }
+
+  // Prethodni period koji se nadovezivao prati novi početak
+  if (start.getTime() !== target.start.getTime()) {
+    const prev = all.find((x) => !changes.has(String(x.spec._id)) && x.end.getTime() === addDays(target.start, -1).getTime());
+    if (prev) {
+      const prevEnd = addDays(start, -1);
+      if (prevEnd >= prev.start) changes.set(String(prev.spec._id), { spec: prev.spec, start: prev.start, end: prevEnd });
+    }
+  }
+
+  // Preklapanja sa ostalim zapisima
+  const changed = [...changes.values()];
+  const toDelete: SpecificationDoc[] = [];
+  for (const other of all) {
+    if (changes.has(String(other.spec._id))) continue;
+    const clash = changed.find((c) => c.start <= other.end && c.end >= other.start);
+    if (!clash) continue;
+    if (other.spec.items.length > 0 || other.spec.isActive)
+      throw httpError(409, `Preklapa se sa periodom ${fmtDay(other.start)} – ${fmtDay(other.end)} koji ima stavke. Prvo izmenite taj period.`);
+    toDelete.push(other.spec);
+  }
+
+  if (toDelete.length) await Specification.deleteMany({ _id: { $in: toDelete.map((s) => s._id) } });
+  for (const c of changed) await Specification.updateOne({ _id: c.spec._id }, { $set: { startDate: c.start, endDate: c.end } });
+  const fresh = await Specification.findById(target.spec._id);
+  if (!fresh) throw httpError(404, "Specifikacija nije pronađena");
+  return fresh;
 }
