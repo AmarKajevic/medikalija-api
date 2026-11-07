@@ -263,6 +263,7 @@ const addArticleToPatient = async (req: Request, res: Response) => {
       itemId: articleId,
       amount,
       user: req.user,
+      specificationId: req.body.specificationId,
     });
 
     return res.status(200).json({ success: true, ...result });

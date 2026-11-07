@@ -7,6 +7,7 @@ import app from "../../app.js";
 import User from "../../models/User.js";
 import Token from "../../models/Token.js";
 import { setGoogleVerifier } from "../../services/auth/google.js";
+import { ensureUserIndexes } from "../../services/auth/indexes.js";
 import { authHeader, createUser, must, useTestDatabase, type UserDoc } from "../helpers/setup.js";
 
 useTestDatabase();
@@ -71,6 +72,45 @@ describe("pozivnica", () => {
     const { body } = await invite({ name: "Ana", lastName: "Anić", email: "ana@dom.rs", role: "nurse" });
     await User.updateOne({ _id: body.user._id }, { "link.expiresAt": new Date(Date.now() - 1000) });
     assert.equal((await request(app).post(`/api/auth/link/${tokenOf(body.invite.url)}`).send({ password: "moja-nova-lozinka" })).status, 410);
+  });
+});
+
+describe("stara baza i postojeće adrese", () => {
+  test("stari indeks email_1 se popravlja: više pozvanih korisničkim imenom (bez mejla)", async () => {
+    // Stanje produkcijske baze pre ove verzije
+    await User.collection.dropIndexes();
+    await User.collection.createIndex({ email: 1 }, { unique: true, name: "email_1" });
+    await ensureUserIndexes();
+    assert.equal((await invite({ name: "Sanja", lastName: "P", username: "sanja.p", role: "nurse" })).status, 201);
+    assert.equal((await invite({ name: "Mira", lastName: "M", username: "mira.m", role: "nurse" })).status, 201);
+  });
+
+  test("adresa suspendovanog korisnika: jasna poruka i kome pripada", async () => {
+    const old = await createUser("nurse", { name: "Mira", lastName: "Mirić", email: "mira@dom.rs", status: "suspended" });
+    const res = await invite({ name: "Mira", lastName: "Mirić", email: "MIRA@dom.rs", role: "nurse" });
+    assert.equal(res.status, 409);
+    assert.match(res.body.message, /ukinut pristup/);
+    assert.equal(res.body.existing._id, String(old._id));
+    assert.equal(res.body.existing.status, "suspended");
+  });
+
+  test("povučena pozivnica oslobađa adresu", async () => {
+    const { body } = await invite({ name: "Ana", lastName: "Anić", email: "ana@dom.rs", role: "nurse" });
+    await request(app).delete(`/api/auth/users/${body.user._id}`).set(authHeader(admin));
+    assert.equal((await invite({ name: "Ana", lastName: "Anić", email: "ana@dom.rs", role: "nurse" })).status, 201);
+  });
+});
+
+describe("slanje linka mejlom", () => {
+  test("bez mejl servisa: jasna poruka; nevažeći link se ne šalje", async () => {
+    const { body } = await invite({ name: "Ana", lastName: "Anić", username: "ana.a", role: "nurse" });
+    const send = (b: object) => request(app).post("/api/auth/links/send").set(authHeader(admin)).send(b);
+    assert.equal((await send({ url: body.invite.url, email: "nije-mejl" })).status, 400);
+    assert.equal((await send({ url: "https://app/invite/izmisljen-token-izmisljen-token", email: "ana@dom.rs" })).status, 410);
+    const res = await send({ url: body.invite.url, email: "ana@dom.rs" });
+    assert.equal(res.status, 503);
+    assert.match(res.body.message, /nije podešeno/);
+    assert.equal((await request(app).post("/api/auth/links/send").set(authHeader(mainNurse)).send({ url: body.invite.url, email: "ana@dom.rs" })).status, 403);
   });
 });
 

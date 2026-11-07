@@ -9,7 +9,8 @@ import { param } from "../utils/http.js";
 const router = express.Router()
 
 router.post("/add",authMiddleware, requireManager, addCombination)
-router.post("/addToPatient/:patientId",authMiddleware, addCombinationToPatient)
+// Analize ulaze u specifikaciju — samo uprava
+router.post("/addToPatient/:patientId",authMiddleware, requireManager, addCombinationToPatient)
 router.get("/combinations/:patientId", authMiddleware, getPatientCombinations)
 router.delete("/combinations/:id",authMiddleware, requireManager, deleteCombination);
 router.delete("/patient/:patientId/combinations/delete-all",authMiddleware, requireManager, async (req: Request, res: Response) => {

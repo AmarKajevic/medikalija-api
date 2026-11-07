@@ -8,7 +8,10 @@ type Id = Types.ObjectId | string;
 type PatientDoc = HydratedDocument<import("mongoose").InferSchemaType<typeof Patient.schema>>;
 type DayInput = Date | string | number | null | undefined;
 import {
+  addDays,
   addYears,
+  calendarDayInZone,
+  SPEC_PERIOD_DAYS,
   diffInDays,
   normalizeStoredDay,
   nextPeriodAfter,
@@ -117,6 +120,53 @@ export async function activateExistingSpecification(patientId: Id, specId: Id): 
   const spec = await Specification.findOne({ _id: specId, patientId });
   if (!spec) throw httpError(404, "Specifikacija nije pronađena");
   return setActiveSpec(patientId, spec);
+}
+
+// Period specifikacije: period neposredno pre aktivnog — poslednji koji je istekao.
+// Specifikacija se uglavnom obračunava kad period istekne, pa uprava najčešće radi
+// u ovom periodu. Ako zapis ne postoji, pravi se po mreži od 30 dana (ne pre prijema).
+export async function getBillingPeriodSpecification(patientId: Id, activeSpec?: SpecificationDoc | null): Promise<SpecificationDoc | null> {
+  const active = activeSpec === undefined ? await getActiveSpecification(patientId) : activeSpec;
+  if (!active) return null;
+  const activeStart = normalizeStoredDay(active.startDate);
+  if (!activeStart) return null;
+  const end = addDays(activeStart, -1);
+
+  const existing = await Specification.findOne({ patientId, _id: { $ne: active._id }, endDate: sameDayQuery(end) }).sort({ startDate: -1 });
+  if (existing) return existing;
+
+  const patient = await Patient.findById(patientId);
+  const admission = normalizeStoredDay(patient?.admissionDate);
+  if (!admission || end < admission) return null; // aktivan je prvi period
+  const gridStart = addDays(end, -(SPEC_PERIOD_DAYS - 1));
+  return findOrCreateSpecForRange(patientId, gridStart < admission ? admission : gridStart, end);
+}
+
+const inRange = (spec: SpecificationDoc, day: Date) => {
+  const start = normalizeStoredDay(spec.startDate);
+  const end = normalizeStoredDay(spec.endDate);
+  return !!start && !!end && day >= start && day <= end;
+};
+
+// U koji period ide nova stavka:
+//  - izričito izabran (specificationId): samo aktivan period ili period specifikacije
+//  - po datumu (at, npr. kad je sestra dala lek): period specifikacije ako datum pada u njega
+//  - inače aktivan period
+export async function resolveTargetSpecification(patientId: Id, { specificationId, at }: { specificationId?: unknown; at?: Date | null } = {}): Promise<SpecificationDoc> {
+  const active = await getActiveSpecification(patientId);
+  if (!active) throw httpError(409, "Pacijent nema aktivnu specifikaciju (otpušten je ili ne postoji).");
+
+  if (specificationId) {
+    if (String(active._id) === String(specificationId)) return active;
+    const billing = await getBillingPeriodSpecification(patientId, active);
+    if (billing && String(billing._id) === String(specificationId)) return billing;
+    throw httpError(409, "Stavke se dodaju samo u aktivan period ili u period specifikacije.");
+  }
+  if (at) {
+    const billing = await getBillingPeriodSpecification(patientId, active);
+    if (billing && inRange(billing, calendarDayInZone(at))) return billing;
+  }
+  return active;
 }
 
 // Period (iz mreže 30-dnevnih perioda od dana prijema) u koji pada današnji dan.

@@ -8,7 +8,7 @@ import GlobalSetting from "../models/GlobalSetting.js";
 import { errorMessage, httpError, statusOf } from "../utils/errors.js";
 import { param } from "../utils/http.js";
 import { isMailEnabled, linkEmail, sendMail } from "../utils/mailer.js";
-import { issueLink, type LinkPurpose } from "../services/auth/links.js";
+import { findByLink, issueLink, type LinkPurpose } from "../services/auth/links.js";
 import { revokeSessions } from "./authController.js";
 
 type UserDoc = HydratedDocument<UserAttrs>;
@@ -48,38 +48,58 @@ async function facilityName() {
   return (await GlobalSetting.findOne().lean())?.facility?.name || "Medikalija";
 }
 
+function linkMessage(user: UserDoc, purpose: LinkPurpose, inviter: { name: string; lastName: string }, facility: string, url: string) {
+  return {
+    subject: purpose === "invite" ? `Pozivnica za ${facility}` : `${facility}: nova lozinka`,
+    ...linkEmail(
+      purpose === "invite"
+        ? {
+            facility,
+            greeting: `Zdravo ${user.name},`,
+            body: `${inviter.name} ${inviter.lastName} vas poziva da koristite aplikaciju doma kao ${ROLE_LABEL[user.role] ?? user.role}. Link važi 7 dana.`,
+            action: "Prihvati pozivnicu",
+            url,
+            footer: "Ako ne očekujete ovu pozivnicu, ignorišite poruku.",
+          }
+        : {
+            facility,
+            greeting: `Zdravo ${user.name},`,
+            body: "Uprava doma vam je poslala link za postavljanje nove lozinke. Link važi 24 sata.",
+            action: "Postavi lozinku",
+            url,
+            footer: "Ako niste tražili novu lozinku, javite se upravi doma.",
+          }
+    ),
+  };
+}
+
 /** Izdaje link i šalje ga mejlom ako je moguće; uvek vraća link (admin ga može kopirati) */
 async function sendLink(user: UserDoc, purpose: LinkPurpose, inviter: { name: string; lastName: string }) {
   const { url, expiresAt } = await issueLink(user, purpose);
   let emailSent = false;
   if (user.email && isMailEnabled()) {
-    const facility = await facilityName();
-    emailSent = await sendMail({
-      to: user.email,
-      subject: purpose === "invite" ? `Pozivnica za ${facility}` : `${facility}: nova lozinka`,
-      ...linkEmail(
-        purpose === "invite"
-          ? {
-              facility,
-              greeting: `Zdravo ${user.name},`,
-              body: `${inviter.name} ${inviter.lastName} vas poziva da koristite aplikaciju doma kao ${ROLE_LABEL[user.role] ?? user.role}. Link važi 7 dana.`,
-              action: "Prihvati pozivnicu",
-              url,
-              footer: "Ako ne očekujete ovu pozivnicu, ignorišite poruku.",
-            }
-          : {
-              facility,
-              greeting: `Zdravo ${user.name},`,
-              body: "Uprava doma vam je poslala link za postavljanje nove lozinke. Link važi 24 sata.",
-              action: "Postavi lozinku",
-              url,
-              footer: "Ako niste tražili novu lozinku, javite se upravi doma.",
-            }
-      ),
-    });
+    emailSent = await sendMail({ to: user.email, ...linkMessage(user, purpose, inviter, await facilityName(), url) });
   }
   return { url, expiresAt, emailSent };
 }
+
+// POST /api/auth/links/send  { url, email } — šalje već izdat link na upisanu adresu.
+// Link mora biti važeći (proverava se heš), pa se ne može poslati proizvoljan sadržaj.
+export const emailExistingLink = async (req: Request, res: Response) => {
+  try {
+    const email = typeof req.body?.email === "string" ? req.body.email.trim().toLowerCase() : "";
+    if (!EMAIL.test(email)) throw httpError(400, "Unesite ispravnu e-mail adresu.");
+    const token = typeof req.body?.url === "string" ? req.body.url.split("/").pop() : "";
+    const user = await findByLink(token);
+    if (!user || !user.link?.purpose) throw httpError(410, "Link je istekao ili je zamenjen novim. Napravite novi.");
+    if (!isMailEnabled()) throw httpError(503, "Slanje mejlova nije podešeno na serveru.");
+    const sent = await sendMail({ to: email, ...linkMessage(user, user.link.purpose as LinkPurpose, req.user, await facilityName(), req.body.url) });
+    if (!sent) throw httpError(502, "Mejl nije poslat. Proverite adresu ili pokušajte kasnije.");
+    res.json({ success: true, message: `Link je poslat na ${email}.` });
+  } catch (err) {
+    fail(res, err);
+  }
+};
 
 async function loadTarget(req: Request) {
   const id = param(req, "id");
@@ -112,6 +132,25 @@ export const inviteUser = async (req: Request, res: Response) => {
     const role = String(req.body?.role ?? "");
     if (!isActiveRole(role)) throw httpError(400, "Izaberite ulogu sa pristupom aplikaciji.");
     if (!identity.email && !identity.username) throw httpError(400, "Unesite e-mail ili korisničko ime (za osoblje bez mejla).");
+
+    // Adresa ili korisničko ime već postoji: reći kome pripada i šta da se uradi
+    const existing = await User.findOne({ $or: [identity.email ? { email: identity.email } : null, identity.username ? { username: identity.username } : null].filter(Boolean) as object[] });
+    if (existing) {
+      const who = `${existing.name} ${existing.lastName}`;
+      const field = identity.email && existing.email === identity.email ? "e-mail adresa" : "korisničko ime";
+      const message = !isActiveRole(existing.role) || existing.loginAllowed === false
+        ? `Ova ${field} je upisana kod osobe ${who} u evidenciji osoblja bez pristupa.`
+        : existing.status === "suspended"
+          ? `Ova ${field} pripada korisniku ${who} kome je ukinut pristup. Vratite mu pristup umesto nove pozivnice.`
+          : existing.status === "invited"
+            ? `${who} već ima pozivnicu sa ovom adresom. Pošaljite novu pozivnicu.`
+            : `Ova ${field} pripada aktivnom korisniku ${who}.`;
+      return res.status(409).json({
+        success: false,
+        message,
+        existing: { _id: existing._id, name: existing.name, lastName: existing.lastName, status: existing.status ?? "active", canLogin: isActiveRole(existing.role) && existing.loginAllowed !== false },
+      });
+    }
 
     const user = await User.create({ ...identity, role, status: "invited", loginAllowed: true, passwordHash: null, invitedBy: req.user._id, invitedAt: new Date() });
     const link = await sendLink(user, "invite", req.user);

@@ -72,9 +72,10 @@ describe("osnovno", () => {
     assert.equal((await create({ ...base, recurrence: { freq: "daily", until: "2026-12-01", count: 3 } })).status, 400);
   });
 
-  test("sestra vidi kalendar, ali ne može da ga menja", async () => {
-    const res = await create({ title: "X", allDay: true, start: "2026-11-10", end: "2026-11-10" }, nurse);
-    assert.equal(res.status, 403);
+  test("sestra zakazuje i menja svoje termine, tuđe ne", async () => {
+    const own = await create({ title: "X", allDay: true, start: "2026-11-10", end: "2026-11-10" }, nurse);
+    assert.equal(own.status, 201);
+    assert.equal((await request(app).delete(`/api/calendar/${own.body.event._id}`).set(authHeader(nurse))).status, 200);
     const { body } = await create({ title: "Y", allDay: true, start: "2026-11-10", end: "2026-11-10" });
     assert.equal((await request(app).delete(`/api/calendar/${body.event._id}`).set(authHeader(nurse))).status, 403);
     assert.equal((await request(app).get("/api/calendar").set(authHeader(nurse))).status, 200);

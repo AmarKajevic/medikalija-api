@@ -6,8 +6,7 @@ import { requireRole, requireStaff, SCHEDULER_ROLES } from "../middleware/requir
 const router = express.Router();
 const schedulers = requireRole(...SCHEDULER_ROLES);
 
-// Pregled ima celo osoblje. Zakazuju uprava, doktor (pregledi) i socijalni radnik
-// (posete); doktor i socijalni radnik menjaju samo svoje termine.
+// Pregled i zakazivanje: celo osoblje. Uprava menja sve termine, ostali samo svoje.
 router.use(authMiddleware, requireStaff);
 
 router.get("/", getEvents);

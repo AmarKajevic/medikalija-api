@@ -20,7 +20,7 @@ import Specification, { type SpecificationDoc, type SpecificationItem } from "..
 import type { UserAttrs } from "../models/User.js";
 import { MANAGER_ROLES, isManagerRole } from "../middleware/requireRole.js";
 import { httpError } from "../utils/errors.js";
-import { getActiveSpecification } from "./getOrCreateActiveSpecification.js";
+import { getActiveSpecification, resolveTargetSpecification } from "./getOrCreateActiveSpecification.js";
 import NurseEntry from "../models/NurseEntry.js";
 
 export { MANAGER_ROLES, httpError };
@@ -224,10 +224,14 @@ interface ConsumeInput {
   user: Actor;
   /** Ko je stvarno dao lek/artikal (sestra čiji unos uprava prihvata); podrazumevano `user` */
   performedBy?: { _id: Types.ObjectId; role: string };
+  /** Period u koji ide stavka: aktivan ili period specifikacije (podrazumevano aktivan) */
+  specificationId?: unknown;
+  /** Kad je dato (raspoređuje u period specifikacije ako datum pada u njega) */
+  at?: Date | null;
 }
 
 // Daje lek/artikal pacijentu: prvo porodično stanje, ostatak sa stanja doma u specifikaciju.
-export async function consumeForPatient(kindName: ConsumableKindName, { patientId, itemId, amount, user, performedBy }: ConsumeInput) {
+export async function consumeForPatient(kindName: ConsumableKindName, { patientId, itemId, amount, user, performedBy, specificationId, at }: ConsumeInput) {
   const kind = KINDS[kindName];
   const useAmount = round2(amount);
   if (!useAmount || useAmount <= 0) throw httpError(400, "Neispravna količina.");
@@ -243,7 +247,7 @@ export async function consumeForPatient(kindName: ConsumableKindName, { patientI
   const author = performedBy ?? user;
 
   // Specifikacija se proverava PRE bilo kakve promene stanja.
-  const spec = await requireActiveSpecification(patientId);
+  const spec = await resolveTargetSpecification(patientId, { specificationId, at });
 
   const familyDoc = await kind.Family.findOne({ patient: patientId, [kind.ref]: itemId });
   const familyUsed = round2(Math.min(Math.max(familyDoc?.quantity || 0, 0), useAmount));
@@ -323,8 +327,8 @@ interface CombinationInput {
   analyses: Array<{ _id: Types.ObjectId; name: string; price?: number | null }>;
 }
 
-export async function addCombinationCharge({ patientId, combination, user }: { patientId: Id; combination: CombinationInput; user: Actor }) {
-  const spec = await requireActiveSpecification(patientId);
+export async function addCombinationCharge({ patientId, combination, user, specificationId }: { patientId: Id; combination: CombinationInput; user: Actor; specificationId?: unknown }) {
+  const spec = await resolveTargetSpecification(patientId, { specificationId });
 
   const analyses = combination.analyses.map((a) => ({ _id: a._id, name: a.name, price: Number(a.price) || 0 }));
   const price = round2(analyses.reduce((sum, a) => sum + a.price, 0));

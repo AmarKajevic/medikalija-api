@@ -8,7 +8,7 @@ export const STAFF_ROLES: readonly Role[] = ["admin", "main-nurse", "nurse", "do
 /** Zdravstveno osoblje: vidi medicinske podatke (svi osim socijalnog radnika) */
 export const CLINICAL_ROLES: readonly Role[] = ["admin", "main-nurse", "nurse", "doctor"];
 /** Smeju da zakazuju u kalendaru (svoje termine; uprava i tuđe) */
-export const SCHEDULER_ROLES: readonly Role[] = ["admin", "main-nurse", "doctor", "social-worker"];
+export const SCHEDULER_ROLES: readonly Role[] = ["admin", "main-nurse", "nurse", "doctor", "social-worker"];
 
 export const isManagerRole = (role: unknown): boolean => MANAGER_ROLES.includes(role as Role);
 

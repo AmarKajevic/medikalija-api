@@ -16,7 +16,8 @@ import NurseEntry, { ENTRY_TYPES, type EntryType, type NurseEntryDoc } from "../
 import User, { type UserAttrs } from "../models/User.js";
 import { isManagerRole } from "../middleware/requireRole.js";
 import { httpError } from "../utils/errors.js";
-import { addServiceCharge, consumeForPatient, removeSpecItem, requireActiveSpecification, round2 } from "./specificationCharges.js";
+import { addServiceCharge, consumeForPatient, removeSpecItem, round2 } from "./specificationCharges.js";
+import { resolveTargetSpecification } from "./getOrCreateActiveSpecification.js";
 
 type Actor = HydratedDocument<UserAttrs>;
 
@@ -134,7 +135,8 @@ export async function acceptEntry(entryId: unknown, user: Actor, amount?: unknow
 
     if (entry.type === "medicine" || entry.type === "article") {
       const itemId = entry.type === "medicine" ? entry.medicine : entry.article;
-      const res = await consumeForPatient(entry.type, { patientId: entry.patient, itemId: String(itemId), amount: qty, user, performedBy: author });
+      // U period u koji pada dan kad je dato (npr. period specifikacije, ako je istekao)
+      const res = await consumeForPatient(entry.type, { patientId: entry.patient, itemId: String(itemId), amount: qty, user, performedBy: author, at: entry.performedAt });
       usedRecords.push(res.usedRecord._id);
       specificationId = res.specification._id;
       charged = round2(res.homeUsed * (Number(res.usedRecord.priceAtTheTime) || 0));
@@ -144,7 +146,7 @@ export async function acceptEntry(entryId: unknown, user: Actor, amount?: unknow
       if (!task) throw httpError(404, "Usluga više ne postoji u katalogu.");
       if (!isBillableTask(task)) throw httpError(400, "Usluga se više ne naplaćuje — odbijte unos.");
       // Proverava se pre bilo kakve izmene, da artikal ne bude skinut ako specifikacije nema
-      const spec = await requireActiveSpecification(entry.patient);
+      const spec = await resolveTargetSpecification(entry.patient, { at: entry.performedAt });
       specificationId = spec._id;
 
       // Prvo cena usluge (lako se povlači), pa artikal; ako artikla nema dovoljno,
@@ -163,6 +165,7 @@ export async function acceptEntry(entryId: unknown, user: Actor, amount?: unknow
             amount: round2(qty * task.articleAmount),
             user,
             performedBy: author,
+            specificationId: spec._id,
           });
           usedRecords.push(res.usedRecord._id);
           charged += round2(res.homeUsed * (Number(res.usedRecord.priceAtTheTime) || 0));

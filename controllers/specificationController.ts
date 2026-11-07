@@ -2,6 +2,7 @@ import Patient from "../models/Patient.js";
 import Specification from "../models/Specification.js"
 import {
   getActiveSpecification,
+  getBillingPeriodSpecification,
   activateSpecificationPeriod,
   activateExistingSpecification,
   activateNextSpecificationPeriod,
@@ -33,6 +34,16 @@ const getSpecification = async (req: Request, res: Response) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: errorMessage(err) });
+  }
+};
+
+// Period specifikacije: period pre aktivnog (poslednji istekao); null ako ga nema
+const getBillingPeriod = async (req: Request, res: Response) => {
+  try {
+    const specification = await getBillingPeriodSpecification(param(req, "patientId"));
+    return res.json({ success: true, specification });
+  } catch (err) {
+    return res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
   }
 };
 
@@ -126,6 +137,9 @@ const saveBillingForSpecification = async (req: Request, res: Response) => {
   try {
     const id = param(req, "id");
     const { previousDebtEUR, nextLodgingEUR } = req.body; // backend više ne očekuje kurseve
+    // Dug i smeštaj su opcioni: isključeni se ne naplaćuju i ne štampaju
+    const includeDebt = req.body.includeDebt === undefined ? Number(previousDebtEUR) > 0 : req.body.includeDebt === true;
+    const includeLodging = req.body.includeLodging === undefined ? Number(nextLodgingEUR) > 0 : req.body.includeLodging === true;
 
     const spec = await Specification.findById(id);
     if (!spec) {
@@ -137,8 +151,8 @@ const saveBillingForSpecification = async (req: Request, res: Response) => {
     const low = globalSettings?.lowerExchangeRate || 0;
     const mid = globalSettings?.middleExchangeRate || 0;
 
-    const debtEUR = Number(previousDebtEUR) || 0;
-    const lodgingEUR = Number(nextLodgingEUR) || 0;
+    const debtEUR = includeDebt ? Math.max(Number(previousDebtEUR) || 0, 0) : 0;
+    const lodgingEUR = includeLodging ? Math.max(Number(nextLodgingEUR) || 0, 0) : 0;
     const specTotalRSD = spec.totalPrice ?? 0;
 
     const specEUR = low > 0 ? specTotalRSD / low : 0;
@@ -154,6 +168,8 @@ const saveBillingForSpecification = async (req: Request, res: Response) => {
     spec.billing = {
       lowerExchangeRate: low,
       middleExchangeRate: mid,
+      includeDebt,
+      includeLodging,
       previousDebtEUR: debtEUR,
       previousDebtRSD: debtRSD,
       nextLodgingEUR: lodgingEUR,
@@ -310,4 +326,4 @@ const getFutureSpecificationPeriods = async (req: Request, res: Response) => {
   }
 };
 
-export {getSpecification, activatePeriod, activateNextPeriod, activateExisting, getFutureSpecificationPeriods, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}
+export {getSpecification, getBillingPeriod, activatePeriod, activateNextPeriod, activateExisting, getFutureSpecificationPeriods, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}

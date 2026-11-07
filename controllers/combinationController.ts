@@ -42,7 +42,7 @@ export const addCombination = async (req: Request, res: Response) => {
 export const addCombinationToPatient = async (req: Request, res: Response) => {
   try {
     const patientId = param(req, "patientId");
-    const { combinationId } = req.body;
+    const { combinationId, specificationId } = req.body;
 
     const combination = await Combination.findById(combinationId)
       .populate<{ analyses: PricedRef[] }>("analyses", "name price");
@@ -54,7 +54,7 @@ export const addCombinationToPatient = async (req: Request, res: Response) => {
       });
     }
 
-    const result = await addCombinationCharge({ patientId, combination, user: req.user });
+    const result = await addCombinationCharge({ patientId, combination, user: req.user, specificationId });
 
     return res.status(201).json({ success: true, ...result });
   } catch (error) {
