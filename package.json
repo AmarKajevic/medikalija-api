@@ -8,7 +8,8 @@
     "start": "tsx watch --env-file=.env index.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test \"tests/**/*.test.ts\"",
-    "normalize-dates": "tsx --env-file=.env scripts/normalizeDates.ts"
+    "normalize-dates": "tsx --env-file=.env scripts/normalizeDates.ts",
+    "migrate-auth": "tsx --env-file=.env scripts/migrateAuth.ts"
   },
   "keywords": [],
   "author": "",
@@ -20,6 +21,7 @@
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
+    "google-auth-library": "^11.3.3",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.18.0"
   },

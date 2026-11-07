@@ -1,6 +1,6 @@
 import jwt from "jsonwebtoken";
 import type { NextFunction, Request, Response } from "express";
-import User from "../models/User.js";
+import User, { canSignIn } from "../models/User.js";
 import { requireEnv } from "../utils/env.js";
 import { allowedByScope } from "./roleScope.js";
 
@@ -26,6 +26,10 @@ const authMiddleware = async (req: Request, res: Response, next: NextFunction) =
     const user = await User.findById(decoded._id).select("-passwordHash");
     if (!user) {
       return res.status(401).json({ success: false, message: "Invalid token" });
+    }
+    // Suspendovan korisnik gubi pristup odmah, ne tek kad mu istekne token
+    if (!canSignIn(user)) {
+      return res.status(401).json({ success: false, message: "Pristup je ukinut." });
     }
 
     if (!allowedByScope(user.role, req)) {
