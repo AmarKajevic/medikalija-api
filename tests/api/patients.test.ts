@@ -122,3 +122,14 @@ describe("učinak rada (beleške sestara)", () => {
     assert.deepEqual(january.body.diagnosis.map((d: { description: string }) => d.description), ["Previjanje rane"]);
   });
 });
+
+
+describe("lista pacijenata", () => {
+  test("poslednji dodati su prvi", async () => {
+    await createPatient({ name: "Prvi" });
+    await createPatient({ name: "Drugi" });
+    await createPatient({ name: "Treći" });
+    const res = await request(app).get("/api/patient").set(authHeader(nurse));
+    assert.deepEqual(res.body.patients.map((p: { name: string }) => p.name), ["Treći", "Drugi", "Prvi"]);
+  });
+});
