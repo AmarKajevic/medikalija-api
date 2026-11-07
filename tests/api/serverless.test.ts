@@ -25,7 +25,8 @@ after(async () => {
 describe("serverless pokretanje", () => {
   test("prvi zahtev sam uspostavlja konekciju (nema 500)", async () => {
     const res = await request(app).post("/api/auth/login").set("Origin", FRONTEND).send({ name: "Nema", lastName: "Takvog", password: "x" });
-    assert.equal(res.status, 404, `očekivan 404 (nepostojeći korisnik), dobijeno ${res.status}: ${JSON.stringify(res.body)}`);
+    // 401 = baza je odgovorila (nepostojeći korisnik); 500/503 bi značilo da konekcija nije uspostavljena
+    assert.equal(res.status, 401, `očekivan 401 (nepostojeći korisnik), dobijeno ${res.status}: ${JSON.stringify(res.body)}`);
     assert.equal(mongoose.connection.readyState, 1);
     assert.equal(res.headers["access-control-allow-origin"], FRONTEND);
   });
@@ -35,7 +36,7 @@ describe("serverless pokretanje", () => {
     const results = await Promise.all(
       Array.from({ length: 5 }, () => request(app).post("/api/auth/login").send({ name: "A", lastName: "B", password: "x" }))
     );
-    assert.deepEqual(results.map((r) => r.status), [404, 404, 404, 404, 404]);
+    assert.deepEqual(results.map((r) => r.status), [401, 401, 401, 401, 401]);
   });
 
   test("CORS preflight za frontend prolazi bez baze", async () => {
