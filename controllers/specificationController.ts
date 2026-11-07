@@ -10,6 +10,7 @@ import {
   futureScheduleHorizon,
   listPastPeriods,
   openPastPeriod,
+  changeSpecificationDates,
 } from "../services/getOrCreateActiveSpecification.js";
 import GlobalSetting from "../models/GlobalSetting.js";
 import { nextPeriodAfter, normalizeStoredDay } from "../utils/dateUtils.js";
@@ -54,6 +55,16 @@ const getPastPeriods = async (req: Request, res: Response) => {
   try {
     const periods = await listPastPeriods(param(req, "patientId"));
     return res.json({ success: true, periods });
+  } catch (err) {
+    return res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
+  }
+};
+
+// Ručna izmena datuma perioda; periodi koji slede se pomeraju
+const changeDates = async (req: Request, res: Response) => {
+  try {
+    const specification = await changeSpecificationDates(param(req, "patientId"), param(req, "specId"), req.body?.startDate, req.body?.endDate);
+    return res.json({ success: true, specification });
   } catch (err) {
     return res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
   }
@@ -327,7 +338,7 @@ const getFutureSpecificationPeriods = async (req: Request, res: Response) => {
     }
 
     const until = futureScheduleHorizon(patient.admissionDate);
-    const periods = buildSpecificationSchedule(patient.admissionDate, until);
+    const periods = buildSpecificationSchedule(patient.admissionDate, until, undefined, await Specification.find({ patientId }));
 
     return res.status(200).json({
       success: true,
@@ -348,4 +359,4 @@ const getFutureSpecificationPeriods = async (req: Request, res: Response) => {
   }
 };
 
-export {getSpecification, getBillingPeriod, getPastPeriods, openPeriod, activatePeriod, activateNextPeriod, activateExisting, getFutureSpecificationPeriods, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}
+export {getSpecification, getBillingPeriod, getPastPeriods, openPeriod, changeDates, activatePeriod, activateNextPeriod, activateExisting, getFutureSpecificationPeriods, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}

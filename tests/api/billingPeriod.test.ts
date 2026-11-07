@@ -151,6 +151,62 @@ describe("svi raniji periodi", () => {
   });
 });
 
+describe("ručna izmena datuma perioda", () => {
+  const put = (url: string, body: object, user: UserDoc = admin) => request(app).put(url).set(authHeader(user)).send(body);
+
+  test("skraćen period (02.09–25.09 umesto 02.09–01.10): sledeći periodi kreću od 26.09.", async () => {
+    // Prijem pre 66 dana: period specifikacije [-36..-7], aktivan [-6..23]
+    const { patient, active, billing } = await setup(66);
+    const res = await put(`/api/specification/${patient._id}/periods/${billing._id}`, { startDate: key(billing.startDate), endDate: key(day(-13)) });
+    assert.equal(res.status, 200, res.body.message);
+    assert.equal(key(res.body.specification.endDate), key(day(-13)));
+
+    // Aktivan (nadovezan) se pomera: počinje dan posle novog kraja, ista dužina
+    const moved = (await get(`/api/specification/${patient._id}`)).body.specification;
+    assert.equal(moved._id, active._id);
+    assert.equal(key(moved.startDate), key(day(-12)));
+    assert.equal(key(moved.endDate), key(day(17)));
+
+    // Raspored i sledeći period idu od pomerenog kraja
+    const schedule = (await get(`/api/specification/${patient._id}/future-spec-periods`)).body.periods;
+    const after = schedule.find((p: { startDate: string }) => key(p.startDate) === key(day(18)));
+    assert.ok(after, "period posle aktivnog počinje dan posle njegovog kraja");
+    assert.equal(key(after.endDate), key(day(47)));
+    const next = await post(`/api/specification/${patient._id}/activate-next`, {});
+    assert.equal(key(next.body.specification?.startDate ?? next.body.startDate ?? ""), key(day(18)));
+  });
+
+  test("raniji periodi prate ručne datume, bez rupa i preklapanja", async () => {
+    const { patient } = await setup(200);
+    const before = (await get(`/api/specification/${patient._id}/past-periods`)).body.periods;
+    const oldest = before[before.length - 1];
+    const opened = (await post(`/api/specification/${patient._id}/periods`, { startDate: key(oldest.startDate), endDate: key(oldest.endDate) })).body.specification;
+    // Prvi period skraćen na 10 dana
+    assert.equal((await put(`/api/specification/${patient._id}/periods/${opened._id}`, { startDate: key(oldest.startDate), endDate: key(day(-191)) })).status, 200);
+    const periods = (await get(`/api/specification/${patient._id}/past-periods`)).body.periods.reverse();
+    assert.equal(key(periods[0].endDate), key(day(-191)));
+    assert.equal(key(periods[1].startDate), key(day(-190)), "sledeći počinje dan posle ručnog kraja");
+    for (let i = 1; i < periods.length; i++)
+      assert.equal(key(new Date(new Date(periods[i - 1].endDate).getTime() + DAY_MS)), key(periods[i].startDate), "bez rupa");
+  });
+
+  test("ne preklapa period sa stavkama; sestra ne menja datume", async () => {
+    const { patient, billing, active } = await setup(66);
+    const med = await Medicine.create({ name: "Andol", pricePerUnit: 50, quantity: 10 });
+    await post("/api/medicine/use", { patientId: String(patient._id), medicineId: String(med._id), amount: 1 });
+    // Produžen početak aktivnog unazad preko perioda specifikacije koji je prazan → prazan se ne bi smeo izgubiti ako ima stavke
+    await post("/api/medicine/use", { patientId: String(patient._id), medicineId: String(med._id), amount: 1, specificationId: billing._id });
+    const res = await put(`/api/specification/${patient._id}/periods/${active._id}`, { startDate: key(day(-20)), endDate: key(active.endDate) });
+    assert.equal(res.status, 200, "prethodni period prati novi početak");
+    const b = (await get(`/api/specification/view/${billing._id}`)).body.specification;
+    assert.equal(key(b.endDate), key(day(-21)));
+    const clash = await put(`/api/specification/${patient._id}/periods/${active._id}`, { startDate: key(day(-60)), endDate: key(active.endDate) });
+    assert.equal(clash.status, 409);
+    assert.match(clash.body.message, /Preklapa se/);
+    assert.equal((await put(`/api/specification/${patient._id}/periods/${active._id}`, { startDate: key(day(-6)), endDate: key(day(10)) }, nurse)).status, 403);
+  });
+});
+
 describe("obračun: dug i smeštaj su opcioni", () => {
   test("isključen dug se ne naplaćuje; smeštaj uključen", async () => {
     await GlobalSetting.create({ lowerExchangeRate: 100, middleExchangeRate: 120 });
