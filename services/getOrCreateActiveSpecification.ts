@@ -1,6 +1,7 @@
 import Specification from "../models/Specification.js";
 import Patient from "../models/Patient.js";
-import type { HydratedDocument, Types } from "mongoose";
+import { Types } from "mongoose";
+import type { HydratedDocument } from "mongoose";
 import type { SpecificationDoc } from "../models/Specification.js";
 import { httpError } from "../utils/errors.js";
 
@@ -149,8 +150,10 @@ const inRange = (spec: SpecificationDoc, day: Date) => {
 };
 
 // U koji period ide nova stavka:
-//  - izričito izabran (specificationId): samo aktivan period ili period specifikacije
-//  - po datumu (at, npr. kad je sestra dala lek): period specifikacije ako datum pada u njega
+//  - izričito izabran (specificationId): aktivan ili bilo koji raniji period pacijenta
+//    (uprava ručno bira period), ali ne budući
+//  - po datumu (at, npr. kad je sestra dala lek): period specifikacije ako datum pada u njega,
+//    pa bilo koji postojeći raniji period u koji pada
 //  - inače aktivan period
 export async function resolveTargetSpecification(patientId: Id, { specificationId, at }: { specificationId?: unknown; at?: Date | null } = {}): Promise<SpecificationDoc> {
   const active = await getActiveSpecification(patientId);
@@ -158,13 +161,24 @@ export async function resolveTargetSpecification(patientId: Id, { specificationI
 
   if (specificationId) {
     if (String(active._id) === String(specificationId)) return active;
-    const billing = await getBillingPeriodSpecification(patientId, active);
-    if (billing && String(billing._id) === String(specificationId)) return billing;
-    throw httpError(409, "Stavke se dodaju samo u aktivan period ili u period specifikacije.");
+    if (!Types.ObjectId.isValid(String(specificationId))) throw httpError(400, "Neispravan period.");
+    const chosen = await Specification.findOne({ _id: specificationId, patientId });
+    if (!chosen) throw httpError(404, "Period nije pronađen.");
+    const chosenStart = normalizeStoredDay(chosen.startDate);
+    const activeStart = normalizeStoredDay(active.startDate);
+    if (!chosenStart || !activeStart || chosenStart > activeStart) throw httpError(409, "Stavke se ne dodaju u budući period.");
+    return chosen;
   }
   if (at) {
+    const day = calendarDayInZone(at);
     const billing = await getBillingPeriodSpecification(patientId, active);
-    if (billing && inRange(billing, calendarDayInZone(at))) return billing;
+    if (billing && inRange(billing, day)) return billing;
+    const activeStart = normalizeStoredDay(active.startDate);
+    if (activeStart && day < activeStart) {
+      const older = await Specification.find({ patientId, _id: { $ne: active._id } }).sort({ startDate: -1 });
+      const match = older.find((s) => inRange(s, day));
+      if (match) return match;
+    }
   }
   return active;
 }
@@ -222,4 +236,62 @@ export function futureScheduleHorizon(admissionDate: DayInput, currentDay: Date 
   const fromToday = addYears(currentDay, FUTURE_SCHEDULE_YEARS);
   const fromAdmission = admissionDay ? addYears(admissionDay, FUTURE_SCHEDULE_YEARS) : fromToday;
   return fromToday > fromAdmission ? fromToday : fromAdmission;
+}
+
+export interface PastPeriod {
+  startDate: Date;
+  endDate: Date;
+  /** Zapis u bazi (null = period iz mreže koji još nije otvaran) */
+  specificationId: string | null;
+  itemsCount: number;
+  totalPrice: number;
+}
+
+// Svi raniji periodi pacijenta, od prijema do aktivnog perioda, od najnovijeg ka najstarijem.
+// Postojeći zapisi (i ručno napravljeni) imaju prednost; praznine se popunjavaju
+// periodima od 30 dana iz mreže od dana prijema.
+export async function listPastPeriods(patientId: Id): Promise<PastPeriod[]> {
+  const patient = await Patient.findById(patientId);
+  if (!patient) throw httpError(404, "Pacijent nije pronađen");
+  const admission = normalizeStoredDay(patient.admissionDate);
+  const active = patient.dischargeDate ? null : await getActiveSpecification(patientId);
+  // Granica: početak aktivnog perioda; otpušten pacijent — dan posle otpusta
+  const limit = normalizeStoredDay(active?.startDate) ?? addDays(normalizeStoredDay(patient.dischargeDate) ?? today(), 1);
+
+  const specs = await Specification.find({ patientId, ...(active ? { _id: { $ne: active._id } } : {}) });
+  const existing = specs
+    .map((s) => ({ s, start: normalizeStoredDay(s.startDate), end: normalizeStoredDay(s.endDate) }))
+    .filter((x): x is { s: SpecificationDoc; start: Date; end: Date } => !!x.start && !!x.end && x.start < limit);
+
+  const result: PastPeriod[] = existing.map(({ s, start, end }) => ({
+    startDate: start,
+    endDate: end,
+    specificationId: String(s._id),
+    itemsCount: s.items.length,
+    totalPrice: s.totalPrice ?? 0,
+  }));
+
+  if (admission) {
+    const lastDay = addDays(limit, -1);
+    for (const p of buildSpecificationSchedule(admission, lastDay)) {
+      const end = p.endDate > lastDay ? lastDay : p.endDate;
+      const overlaps = existing.some((x) => p.startDate <= x.end && end >= x.start);
+      if (!overlaps) result.push({ startDate: p.startDate, endDate: end, specificationId: null, itemsCount: 0, totalPrice: 0 });
+    }
+  }
+  return result.sort((a, b) => b.startDate.getTime() - a.startDate.getTime());
+}
+
+// Otvara raniji period (pravi zapis ako ne postoji) BEZ menjanja aktivnog perioda —
+// uprava u njemu dodaje stavke i pravi obračun.
+export async function openPastPeriod(patientId: Id, startDate: unknown, endDate: unknown): Promise<SpecificationDoc> {
+  const patient = await Patient.findById(patientId);
+  if (!patient) throw httpError(404, "Pacijent nije pronađen");
+  const start = parseCalendarDay(startDate);
+  const end = parseCalendarDay(endDate);
+  if (!start || !end || end < start) throw httpError(400, "Neispravan opseg datuma");
+  const active = patient.dischargeDate ? null : await getActiveSpecification(patientId);
+  const activeStart = normalizeStoredDay(active?.startDate);
+  if (activeStart && start >= activeStart) throw httpError(409, "Izaberite period pre aktivnog.");
+  return findOrCreateSpecForRange(patientId, start, end);
 }

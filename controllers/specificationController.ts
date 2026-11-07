@@ -8,6 +8,8 @@ import {
   activateNextSpecificationPeriod,
   buildSpecificationSchedule,
   futureScheduleHorizon,
+  listPastPeriods,
+  openPastPeriod,
 } from "../services/getOrCreateActiveSpecification.js";
 import GlobalSetting from "../models/GlobalSetting.js";
 import { nextPeriodAfter, normalizeStoredDay } from "../utils/dateUtils.js";
@@ -41,6 +43,26 @@ const getSpecification = async (req: Request, res: Response) => {
 const getBillingPeriod = async (req: Request, res: Response) => {
   try {
     const specification = await getBillingPeriodSpecification(param(req, "patientId"));
+    return res.json({ success: true, specification });
+  } catch (err) {
+    return res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
+  }
+};
+
+// Svi raniji periodi (od prijema), od najnovijeg
+const getPastPeriods = async (req: Request, res: Response) => {
+  try {
+    const periods = await listPastPeriods(param(req, "patientId"));
+    return res.json({ success: true, periods });
+  } catch (err) {
+    return res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
+  }
+};
+
+// Otvara raniji period za rad, bez menjanja aktivnog
+const openPeriod = async (req: Request, res: Response) => {
+  try {
+    const specification = await openPastPeriod(param(req, "patientId"), req.body?.startDate, req.body?.endDate);
     return res.json({ success: true, specification });
   } catch (err) {
     return res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
@@ -326,4 +348,4 @@ const getFutureSpecificationPeriods = async (req: Request, res: Response) => {
   }
 };
 
-export {getSpecification, getBillingPeriod, activatePeriod, activateNextPeriod, activateExisting, getFutureSpecificationPeriods, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}
+export {getSpecification, getBillingPeriod, getPastPeriods, openPeriod, activatePeriod, activateNextPeriod, activateExisting, getFutureSpecificationPeriods, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}
