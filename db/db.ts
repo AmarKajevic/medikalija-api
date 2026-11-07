@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { ensureUserIndexes } from "../services/auth/indexes.js";
 
 let connecting: Promise<typeof mongoose> | null = null;
 
@@ -23,6 +24,8 @@ export default async function connectToDatabase(): Promise<void> {
   try {
     const db = await connecting;
     console.log("MongoDB connected:", db.connection.host);
+    // Stare baze: indeks na e-mailu koji ne dozvoljava korisnike bez mejla
+    await ensureUserIndexes();
   } catch (error) {
     connecting = null;
     console.error("MongoDB connection error:", error);

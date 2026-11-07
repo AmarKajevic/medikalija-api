@@ -57,9 +57,13 @@ const specificationSchema = new mongoose.Schema({
     lowerExchangeRate: { type: Number, default: 0 },   // niži kurs
     middleExchangeRate: { type: Number, default: 0 },  // srednji kurs
 
+    /** Da li se dug iz prethodnog perioda naplaćuje i štampa */
+    includeDebt: { type: Boolean },
     previousDebtEUR: { type: Number, default: 0 },
     previousDebtRSD: { type: Number, default: 0 },
 
+    /** Da li se smeštaj za naredni period naplaćuje i štampa */
+    includeLodging: { type: Boolean },
     nextLodgingEUR: { type: Number, default: 0 },
     nextLodgingRSD: { type: Number, default: 0 },
 

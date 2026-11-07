@@ -1,6 +1,6 @@
 import express from "express";
 import { acceptLink, authConfig, changePassword, forgotPassword, getCurrentUser, getLink, googleLogin, login, logout, refresh } from "../controllers/authController.js";
-import { addStaffRecord, deleteUser, inviteUser, listUsers, resendInvite, sendResetLink, updateUser } from "../controllers/usersController.js";
+import { addStaffRecord, deleteUser, emailExistingLink, inviteUser, listUsers, resendInvite, sendResetLink, updateUser } from "../controllers/usersController.js";
 import authMiddleware from "../middleware/authMiddleware.js";
 import { requireManager, requireRole } from "../middleware/requireRole.js";
 
@@ -29,6 +29,7 @@ router.post("/invitations", authMiddleware, admin, inviteUser);
 router.post("/staff", authMiddleware, admin, addStaffRecord);
 router.post("/users/:id/invite", authMiddleware, admin, resendInvite);
 router.post("/users/:id/reset-link", authMiddleware, admin, sendResetLink);
+router.post("/links/send", authMiddleware, admin, emailExistingLink);
 router.patch("/users/:id", authMiddleware, admin, updateUser);
 router.delete("/users/:id", authMiddleware, admin, deleteUser);
 

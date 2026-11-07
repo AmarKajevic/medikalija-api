@@ -153,10 +153,10 @@ describe("lekarski izveštaji", () => {
 describe("zakazivanje", () => {
   const event = { title: "Pregled", allDay: false, start: "2026-11-10T09:00:00Z", end: "2026-11-10T09:30:00Z" };
 
-  test("doktor i socijalni radnik zakazuju; sestra ne", async () => {
+  test("doktor, socijalni radnik i sestra zakazuju", async () => {
     assert.equal((await as(doctor).post("/api/calendar", event)).status, 201);
     assert.equal((await as(social).post("/api/calendar", { ...event, title: "Poseta porodice" })).status, 201);
-    assert.equal((await as(nurse).post("/api/calendar", event)).status, 403);
+    assert.equal((await as(nurse).post("/api/calendar", { ...event, title: "Vađenje krvi" })).status, 201);
   });
 
   test("doktor menja svoje termine, tuđe ne; uprava menja sve", async () => {
