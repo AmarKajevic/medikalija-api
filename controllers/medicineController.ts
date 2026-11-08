@@ -1,4 +1,4 @@
-import Medicine from "../models/Medicine.js";
+import Medicine, { isMedicineForm } from "../models/Medicine.js";
 import UsedMedicine from "../models/UsedMedicine.js";
 import Patient from "../models/Patient.js";
 import PatientMedicine from "../models/PatientMedicine.js";
@@ -28,7 +28,11 @@ const addMedicine = async (req: Request, res: Response) => {
       unitsPerPackage,
       quantity,
       patientId,
+      form,
     } = req.body;
+    if (form !== undefined && !isMedicineForm(form)) {
+      return res.status(400).json({ success: false, message: "Neispravna vrsta leka." });
+    }
 
     if (!name) {
       return res.status(400).json({
@@ -105,6 +109,8 @@ const addMedicine = async (req: Request, res: Response) => {
         medicine.pricePerUnit = pricePerUnit;
       }
 
+      if (form) medicine.form = form;
+
       if (!medicine.unitsPerPackage && unitsPerPkg > 0) {
         medicine.unitsPerPackage = unitsPerPkg;
       }
@@ -118,6 +124,7 @@ const addMedicine = async (req: Request, res: Response) => {
 
     const newMedicine = new Medicine({
       name,
+      form: form ?? "oral",
       pricePerUnit,
       quantity: totalUnitsAdded,
       unitsPerPackage: unitsPerPkg || 0,
@@ -187,9 +194,11 @@ const updateMedicine = async (req: Request, res: Response) => {
       unitsPerPackage,
       quantity,
       addQuantity,
+      form,
     } = req.body;
-
-    console.log("📦 updateMedicine - req.body:", req.body);
+    if (form !== undefined && !isMedicineForm(form)) {
+      return res.status(400).json({ success: false, message: "Neispravna vrsta leka." });
+    }
 
     const medicine = await Medicine.findById(medicineId);
 
@@ -225,6 +234,8 @@ const updateMedicine = async (req: Request, res: Response) => {
 
       medicine.name = trimmedName;
     }
+
+    if (form !== undefined) medicine.form = form;
 
     // ✅ PRICE
     if (pricePerUnit !== undefined) {

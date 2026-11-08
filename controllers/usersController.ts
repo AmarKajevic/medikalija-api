@@ -19,6 +19,7 @@ const ROLE_LABEL: Record<string, string> = {
   nurse: "medicinska sestra",
   doctor: "doktor",
   "social-worker": "socijalni radnik",
+  physiotherapist: "fizioterapeut",
 };
 
 const fail = (res: Response, err: unknown) => {

@@ -16,6 +16,8 @@ const specificationSchema = new mongoose.Schema({
           ref: "Combination",
         },
       medicine: { type: mongoose.Schema.Types.ObjectId, ref: "Medicine" },
+      // Vrsta leka u trenutku dodavanja ("oral" tablete/kapsule, "parenteral" ampule/rastvori/sol)
+      form: { type: String, default: undefined },
       article: { type: mongoose.Schema.Types.ObjectId, ref: "Article" },
       analyses: [
         {

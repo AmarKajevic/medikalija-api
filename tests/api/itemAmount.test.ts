@@ -22,6 +22,27 @@ beforeEach(async () => {
 const post = (url: string, body: object) => request(app).post(url).set(authHeader(admin)).send(body);
 const patch = (url: string, body: object, user: UserDoc = admin) => request(app).patch(url).set(authHeader(user)).send(body);
 
+describe("vrsta leka", () => {
+  test("lek se pravi kao tablete ili ampule; stavka u specifikaciji pamti vrstu", async () => {
+    const patient = await createPatient();
+    const add = await post("/api/medicine/add", { name: "Fiziološki rastvor", pricePerUnit: 120, quantity: 10, form: "parenteral" });
+    assert.equal(add.status, 201, add.body.message);
+    assert.equal(add.body.medicine.form, "parenteral");
+    assert.equal((await post("/api/medicine/add", { name: "X", pricePerUnit: 1, quantity: 1, form: "sirup" })).status, 400);
+    const tab = await Medicine.create({ name: "Andol", pricePerUnit: 10, quantity: 20 });
+    assert.equal(tab.form, "oral", "podrazumevano tablete");
+
+    await post("/api/medicine/use", { patientId: String(patient._id), medicineId: String(add.body.medicine._id), amount: 1 });
+    const spec = (await post("/api/medicine/use", { patientId: String(patient._id), medicineId: String(tab._id), amount: 1 })).body.specification;
+    const forms = Object.fromEntries(spec.items.map((i: { name: string; form?: string }) => [i.name, i.form]));
+    assert.deepEqual(forms, { "Fiziološki rastvor": "parenteral", Andol: "oral" });
+
+    const changed = await request(app).put(`/api/medicine/${tab._id}`).set(authHeader(admin)).send({ form: "parenteral" });
+    assert.equal(changed.status, 200, changed.body.message);
+    assert.equal(must(await Medicine.findById(tab._id)).form, "parenteral");
+  });
+});
+
 describe("izmena količine stavke", () => {
   test("lek: povećanje skida sa stanja, smanjenje vraća; cena prati količinu", async () => {
     const patient = await createPatient();

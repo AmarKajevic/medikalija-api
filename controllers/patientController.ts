@@ -63,6 +63,38 @@ const addPatient = async (req: Request, res: Response) => {
     res.status(500).json({ success: false, error: errorMessage(err) });
   }
 }
+// Ispravka podataka pacijenta (pogrešno uneto ime, datum, adresa, kontakt). Šalju se
+// samo polja koja se menjaju; postojeće specifikacije i periodi se ne diraju.
+const updatePatient = async (req: Request, res: Response) => {
+  try {
+    const patient = await Patient.findById(param(req, "id"));
+    if (!patient) return res.status(404).json({ success: false, message: "Pacijent nije pronađen." });
+    const body = req.body ?? {};
+
+    for (const field of ["name", "lastName", "address"] as const) {
+      if (body[field] === undefined) continue;
+      const value = typeof body[field] === "string" ? body[field].trim() : "";
+      if (!value) return res.status(400).json({ success: false, message: "Ime, prezime i adresa ne mogu biti prazni." });
+      patient[field] = value.slice(0, 200);
+    }
+    if (body.contactPerson !== undefined) patient.contactPerson = typeof body.contactPerson === "string" ? body.contactPerson.trim().slice(0, 300) : "";
+    for (const field of ["dateOfBirth", "admissionDate"] as const) {
+      if (body[field] === undefined) continue;
+      const day = parseCalendarDay(body[field]);
+      if (!day) return res.status(400).json({ success: false, message: field === "dateOfBirth" ? "Neispravan datum rođenja." : "Neispravan datum prijema." });
+      patient[field] = day;
+    }
+    const birth = normalizeStoredDay(patient.dateOfBirth);
+    const admission = normalizeStoredDay(patient.admissionDate);
+    if (birth && admission && birth > admission) return res.status(400).json({ success: false, message: "Datum rođenja je posle datuma prijema." });
+
+    await patient.save();
+    return res.json({ success: true, message: "Podaci pacijenta su izmenjeni.", patient });
+  } catch (err) {
+    return res.status(500).json({ success: false, message: errorMessage(err) });
+  }
+};
+
 const deletePatient = async (req: Request, res: Response) => {
     try {
         if (req.user.role !== "admin" && req.user.role !== "main-nurse") {
@@ -134,4 +166,4 @@ const dischargePatient = async (req: Request, res: Response) => {
 
 
 
-export {getPatients,addPatient, getPatient, deletePatient, dischargePatient}
+export {getPatients,addPatient, getPatient, updatePatient, deletePatient, dischargePatient}

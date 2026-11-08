@@ -95,7 +95,7 @@ export const pendingSummary = async (_req: Request, res: Response) => {
 // POST /api/nurse-entries/:id/accept  { amount? }
 export const accept = async (req: Request, res: Response) => {
   try {
-    const result = await acceptEntry(param(req, "id"), req.user, req.body?.amount);
+    const result = await acceptEntry(param(req, "id"), req.user, req.body?.amount, undefined, req.body?.price);
     res.json({ success: true, message: result.message, entry: result.ok ? result.entry : null });
   } catch (err) {
     fail(res, err);

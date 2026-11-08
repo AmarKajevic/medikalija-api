@@ -52,6 +52,26 @@ describe("POST /api/patient/addPatient", () => {
   });
 });
 
+describe("PUT /api/patient/:id — ispravka podataka", () => {
+  test("uprava menja pogrešno uneto; prazno i nelogično se odbija; sestra ne može", async () => {
+    const created = (await request(app).post("/api/patient/addPatient").set(authHeader(admin)).send(validPatient)).body.patient;
+    const put = (body: object, user: UserDoc = admin) => request(app).put(`/api/patient/${created._id}`).set(authHeader(user)).send(body);
+
+    const res = await put({ name: " Milena ", dateOfBirth: "1938-05-12", contactPerson: "Ana, 064 111 222" });
+    assert.equal(res.status, 200, res.body.message);
+    const saved = must(await Patient.findById(created._id));
+    assert.equal(saved.name, "Milena");
+    assert.equal(saved.lastName, "Jovanović", "nepromenjeno ostaje");
+    assert.equal(saved.dateOfBirth.toISOString().slice(0, 10), "1938-05-12");
+    assert.equal(saved.contactPerson, "Ana, 064 111 222");
+
+    assert.equal((await put({ lastName: "  " })).status, 400);
+    assert.equal((await put({ dateOfBirth: "2026-12-01" })).status, 400, "rođen posle prijema");
+    assert.equal((await put({ admissionDate: "nije datum" })).status, 400);
+    assert.equal((await put({ name: "X" }, nurse)).status, 403);
+  });
+});
+
 describe("PATCH /api/patient/:id/discharge", () => {
   test("medicinska sestra ne može da otpusti pacijenta", async () => {
     const patient = await createPatient();

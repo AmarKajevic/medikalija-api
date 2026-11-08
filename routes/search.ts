@@ -25,7 +25,7 @@ router.get("/", authMiddleware, async (req: Request, res: Response) => {
     if (!byName || !byPerson) return res.json({ success: true, results: [] });
 
     // Socijalni radnik vidi samo pacijente
-    const patientsOnly = req.user.role === "social-worker";
+    const patientsOnly = req.user.role === "social-worker" || req.user.role === "physiotherapist";
 
     const [medicines, articles, patients] = await Promise.all([
       patientsOnly ? [] : Medicine.find(byName).sort({ name: 1 }).limit(10).select("_id name quantity familyQuantity"),
