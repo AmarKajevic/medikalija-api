@@ -16,4 +16,7 @@ const NotificationSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+// Zvonce: nepročitana obaveštenja korisnika, najnovija prva
+NotificationSchema.index({ userId: 1, isRead: 1, createdAt: -1 });
+
 export default mongoose.model("Notification", NotificationSchema);

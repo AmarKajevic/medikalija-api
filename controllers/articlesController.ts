@@ -224,7 +224,7 @@ const deleteArticle = async (req: Request, res: Response) => {
 // 📄 Dohvati sve artikle
 const getArticles = async (_req: Request, res: Response) => {
   try {
-    const articles = await Article.find().sort({ name: 1 });
+    const articles = await Article.find().sort({ name: 1 }).lean();
     return res.status(200).json({ success: true, articles });
   } catch (error) {
     return res.status(500).json({ success: false, message: errorMessage(error) });
@@ -278,12 +278,12 @@ const addArticleToPatient = async (req: Request, res: Response) => {
 // 📄 Istorija potrošnje pacijenta
 const getPatientArticles = async (req: Request, res: Response) => {
   const patientId = param(req, "patientId");
-  console.log("➡️ getPatientArticles patientId:", patientId); // dodaj za proveru
   try {
-    const articles = await UsedArticles.find({ patient: patientId }) // <--- OVO!
+    const articles = await UsedArticles.find({ patient: patientId })
       .populate("article", "name price")
       .populate("createdBy", "name role")
-      .sort({ createdAt: -1 });
+      .sort({ createdAt: -1 })
+      .lean();
 
     return res.status(200).json({ success: true, articles });
   } catch (error) {

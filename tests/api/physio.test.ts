@@ -45,21 +45,32 @@ describe("fizikalna terapija", () => {
     assert.equal(mine.length, 2);
   });
 
-  test("uprava određuje cenu i odobrava; tek tada ulazi u specifikaciju", async () => {
+  test("cena iz cenovnika koji admin unosi unapred; tek odobrena ulazi u specifikaciju", async () => {
     const [entry] = (await log(physio, [{ type: "physio", physioKind: "passive", extra: true }])).body.entries;
     const noPrice = await as(admin).post(`/api/nurse-entries/${entry._id}/accept`, {});
-    assert.equal(noPrice.status, 400);
-    assert.match(noPrice.body.message, /cenu/);
+    assert.equal(noPrice.status, 400, "bez cene u cenovniku");
+    assert.match(noPrice.body.message, /Cene fizioterapije/);
 
-    const ok = await as(admin).post(`/api/nurse-entries/${entry._id}/accept`, { price: 1500 });
+    const put = (kind: string, priceRSD: unknown, user: UserDoc = admin) => request(app).put(`/api/physio-prices/${kind}`).set(authHeader(user)).send({ priceRSD });
+    assert.equal((await put("passive", 1500)).status, 200);
+    assert.equal((await put("group", 800)).status, 200);
+    assert.equal((await put("passive", -1)).status, 400);
+    assert.equal((await put("masaža", 1)).status, 400);
+    const mainNurse = await createUser("main-nurse");
+    assert.equal((await put("active", 100, mainNurse)).status, 403, "cene menja admin");
+    const list = (await as(mainNurse).get("/api/physio-prices")).body.prices;
+    assert.deepEqual(list, [{ kind: "active", priceRSD: null }, { kind: "passive", priceRSD: 1500 }, { kind: "group", priceRSD: 800 }]);
+    assert.equal((await as(physio).get("/api/physio-prices")).status, 403);
+
+    const ok = await as(admin).post(`/api/nurse-entries/${entry._id}/accept`, { price: 1 });
     assert.equal(ok.status, 200, ok.body.message);
     const item = must((await spec()).items.find((i: { category?: string }) => i.category === "physio"));
     assert.equal(item.name, "Individualna pasivna fizikalna terapija (vanredna)");
     assert.equal(item.price, 1500);
 
-    // Grupno odobravanje prosleđuje cenu po unosu
+    // I grupno odobravanje uzima cenu iz cenovnika (poslata cena se ne koristi)
     const [second] = (await log(physio, [{ type: "physio", physioKind: "group", extra: true }])).body.entries;
-    const bulk = await as(admin).post("/api/nurse-entries/accept", { items: [{ id: second._id, price: 800 }] });
+    const bulk = await as(admin).post("/api/nurse-entries/accept", { items: [{ id: second._id }] });
     assert.equal(bulk.status, 200, bulk.body.message);
     assert.equal((await spec()).totalPrice, 2300);
   });

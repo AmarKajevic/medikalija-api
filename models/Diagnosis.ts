@@ -23,4 +23,7 @@ const diagnosisSchema = new mongoose.Schema({
   {timestamps: true}
 );
 
+// Učinak rada pacijenta, najnoviji prvi
+diagnosisSchema.index({ patient: 1, createdAt: -1 });
+
 export default mongoose.model("Diagnosis", diagnosisSchema)

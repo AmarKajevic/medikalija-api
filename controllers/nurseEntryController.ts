@@ -67,7 +67,7 @@ export const list = async (req: Request, res: Response) => {
     if (Object.keys(range).length) filter.performedAt = range;
 
     const limit = Math.min(Math.max(Number(req.query.limit) || 200, 1), 2000);
-    const entries = await populate(NurseEntry.find(filter).sort({ performedAt: -1 }).limit(limit));
+    const entries = await populate(NurseEntry.find(filter).sort({ performedAt: -1 }).limit(limit)).lean();
     res.json({ success: true, entries });
   } catch (err) {
     fail(res, err);
@@ -95,7 +95,7 @@ export const pendingSummary = async (_req: Request, res: Response) => {
 // POST /api/nurse-entries/:id/accept  { amount? }
 export const accept = async (req: Request, res: Response) => {
   try {
-    const result = await acceptEntry(param(req, "id"), req.user, req.body?.amount, undefined, req.body?.price);
+    const result = await acceptEntry(param(req, "id"), req.user, req.body?.amount);
     res.json({ success: true, message: result.message, entry: result.ok ? result.entry : null });
   } catch (err) {
     fail(res, err);

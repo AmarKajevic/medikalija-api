@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import Patient from "../models/Patient.js";
 import Specification from "../models/Specification.js"
 import {
@@ -255,29 +256,39 @@ const saveBillingForSpecification = async (req: Request, res: Response) => {
 
 
 // 📌 VRATI istoriju + aktivnu specifikaciju
+// Lista perioda bez samih stavki (broj stavki se računa u bazi) — za pacijenta sa
+// godinama perioda odgovor je nekoliko KB umesto stotina; stavke se učitavaju po periodu.
 const getSpecificationHistory = async (req: Request, res: Response) => {
   try {
     const patientId = param(req, "patientId");
+    if (!mongoose.isValidObjectId(patientId)) return res.status(400).json({ message: "Neispravan pacijent." });
 
-    const specs = await Specification.find({ patientId }).sort({ startDate: 1 });
-
-    if (!specs.length) {
-      return res.json({ activeSpec: null, history: [] });
-    }
-
-    const patient = await Patient.findById(patientId);
+    const [specs, patient] = await Promise.all([
+      Specification.aggregate([
+        { $match: { patientId: new mongoose.Types.ObjectId(patientId) } },
+        { $sort: { startDate: -1 } },
+        {
+          $project: {
+            startDate: 1,
+            endDate: 1,
+            isActive: 1,
+            nonStandard: 1,
+            totalPrice: 1,
+            "billing.totalEUR": 1,
+            "billing.totalRSD": 1,
+            itemsCount: { $size: { $ifNull: ["$items", []] } },
+          },
+        },
+      ]),
+      Patient.findById(patientId, { dischargeDate: 1 }).lean(),
+    ]);
 
     // Aktivan period je onaj eksplicitno markiran isActive:true (osim ako je
     // pacijent otpušten — tada su sve specifikacije istorija).
-    let activeSpec = patient?.dischargeDate ? null : specs.find((s) => s.isActive) || null;
-    let history = specs.filter((s) => !activeSpec || s._id.toString() !== activeSpec._id.toString());
+    const activeSpec = patient?.dischargeDate ? null : specs.find((s) => s.isActive) || null;
+    const history = specs.filter((s) => !activeSpec || String(s._id) !== String(activeSpec._id));
 
-    history = history.sort((a, b) => b.startDate.getTime() - a.startDate.getTime());
-
-    return res.json({
-      activeSpec: activeSpec || null,
-      history,
-    });
+    return res.json({ activeSpec, history });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: "Greška pri učitavanju istorije." });
@@ -368,7 +379,7 @@ const calculatePreview = (req: Request, res: Response) => {
 
 
 
-// 📅 RASPORED 30-DNEVNIH PERIODA (od prijema do 10 godina unapred)
+// 📅 RASPORED 30-DNEVNIH PERIODA (od prijema do 20 godina unapred)
 const getFutureSpecificationPeriods = async (req: Request, res: Response) => {
   try {
     const patientId = param(req, "patientId");

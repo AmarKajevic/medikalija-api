@@ -97,5 +97,9 @@ const specificationSchema = new mongoose.Schema({
 export type SpecificationDoc = HydratedDocumentFromSchema<typeof specificationSchema>;
 export type SpecificationItem = SpecificationDoc["items"][number];
 
+// Periodi pacijenta (lanac, istorija, raniji periodi) i aktivan period
+specificationSchema.index({ patientId: 1, startDate: 1 });
+specificationSchema.index({ patientId: 1, isActive: 1 });
+
 const Specification = mongoose.model("Specification", specificationSchema);
 export default Specification;
