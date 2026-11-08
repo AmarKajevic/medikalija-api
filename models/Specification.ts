@@ -69,11 +69,14 @@ const specificationSchema = new mongoose.Schema({
     includeLodging: { type: Boolean },
     nextLodgingEUR: { type: Number, default: 0 },
     nextLodgingRSD: { type: Number, default: 0 },
+    /** Izabrana cena iz cenovnika smeštaja (npr. "30 dana"); prazno = ručno unet iznos */
+    nextLodgingOption: { type: String, default: "" },
 
     /** Vanstandardni period smeštaja (npr. dani pre početka perioda) — opciono, kao dug i smeštaj */
     includeEarlyLodging: { type: Boolean },
     earlyLodgingEUR: { type: Number, default: 0 },
     earlyLodgingRSD: { type: Number, default: 0 },
+    earlyLodgingOption: { type: String, default: "" },
 
     specEUR: { type: Number, default: 0 },             // specifikacija u evrima
     totalRSD: { type: Number, default: 0 },
