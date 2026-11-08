@@ -43,6 +43,31 @@ describe("vrsta leka", () => {
   });
 });
 
+describe("razvrstavanje lekova", () => {
+  test("više lekova odjednom u ampule; stavke u specifikaciji prate novu vrstu; sestra ne može", async () => {
+    const patient = await createPatient();
+    const a = await Medicine.create({ name: "Ceftriakson amp", pricePerUnit: 300, quantity: 20 });
+    const b = await Medicine.create({ name: "Fiziološki rastvor", pricePerUnit: 120, quantity: 20 });
+    const c = await Medicine.create({ name: "Andol", pricePerUnit: 10, quantity: 20 });
+    await post("/api/medicine/use", { patientId: String(patient._id), medicineId: String(a._id), amount: 1 });
+    const spec = (await post("/api/medicine/use", { patientId: String(patient._id), medicineId: String(c._id), amount: 1 })).body.specification;
+
+    const res = await patch("/api/medicine/form", { ids: [String(a._id), String(b._id)], form: "parenteral" });
+    assert.equal(res.status, 200, res.body.message);
+    assert.equal(res.body.modified, 2);
+    assert.deepEqual(
+      (await Medicine.find().sort({ name: 1 })).map((m) => [m.name, m.form]),
+      [["Andol", "oral"], ["Ceftriakson amp", "parenteral"], ["Fiziološki rastvor", "parenteral"]]
+    );
+    const items = (await request(app).get(`/api/specification/view/${spec._id}`).set(authHeader(admin))).body.specification.items;
+    assert.deepEqual(Object.fromEntries(items.map((i: { name: string; form?: string }) => [i.name, i.form])), { "Ceftriakson amp": "parenteral", Andol: "oral" });
+
+    assert.equal((await patch("/api/medicine/form", { ids: [String(a._id)], form: "sirup" })).status, 400);
+    assert.equal((await patch("/api/medicine/form", { ids: [], form: "oral" })).status, 400);
+    assert.equal((await patch("/api/medicine/form", { ids: [String(a._id)], form: "oral" }, nurse)).status, 403);
+  });
+});
+
 describe("izmena količine stavke", () => {
   test("lek: povećanje skida sa stanja, smanjenje vraća; cena prati količinu", async () => {
     const patient = await createPatient();

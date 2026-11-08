@@ -1,5 +1,7 @@
+import mongoose from "mongoose";
 import Medicine, { isMedicineForm } from "../models/Medicine.js";
 import UsedMedicine from "../models/UsedMedicine.js";
+import Specification from "../models/Specification.js";
 import Patient from "../models/Patient.js";
 import PatientMedicine from "../models/PatientMedicine.js";
 
@@ -502,7 +504,34 @@ const deletePatientMedicine = async (req: Request, res: Response) => {
 
 
 
+/**
+ * Razvrstavanje lekova: tablete/kapsule ili ampule/rastvori/sol, za više lekova odjednom.
+ * Ispravlja se i vrsta na stavkama tih lekova koje su već u specifikacijama (sve su
+ * dobile "tablete" samo zato što je to bilo podrazumevano), pa se grupe tamo poklapaju.
+ */
+const setMedicinesForm = async (req: Request, res: Response) => {
+  try {
+    const { ids, form } = req.body ?? {};
+    if (!isMedicineForm(form)) return res.status(400).json({ success: false, message: "Neispravna vrsta leka." });
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ success: false, message: "Izaberite lekove." });
+    if (ids.length > 2000 || !ids.every((id) => mongoose.isValidObjectId(id))) {
+      return res.status(400).json({ success: false, message: "Neispravan izbor lekova." });
+    }
+    const objectIds = ids.map((id: string) => new mongoose.Types.ObjectId(id));
+    const updated = await Medicine.updateMany({ _id: { $in: objectIds } }, { $set: { form } });
+    await Specification.updateMany(
+      { "items.medicine": { $in: objectIds } },
+      { $set: { "items.$[it].form": form } },
+      { arrayFilters: [{ "it.medicine": { $in: objectIds } }] }
+    );
+    return res.json({ success: true, message: `Prebačeno: ${updated.modifiedCount}.`, modified: updated.modifiedCount });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: errorMessage(error) });
+  }
+};
+
 export {
+  setMedicinesForm,
   addMedicine,
   useMedicine,
   getMedicines,
