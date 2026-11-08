@@ -1,9 +1,13 @@
 import mongoose, { type HydratedDocumentFromSchema, type InferSchemaType } from "mongoose";
 
 // Unos medicinske sestre za pacijenta: dat lek, dat artikal ili urađena usluga nege.
+// Fizioterapeut beleži fizikalnu terapiju ("physio"): redovna se samo beleži, vanredna
+// čeka da uprava odredi cenu i odobri je (tada ulazi u specifikaciju).
 // Ono što se naplaćuje čeka da ga uprava prihvati (tada ulazi u specifikaciju i
 // skida se sa stanja) ili odbije. Usluge bez naplate se samo beleže.
-export const ENTRY_TYPES = ["medicine", "article", "care"] as const;
+export const ENTRY_TYPES = ["medicine", "article", "care", "physio"] as const;
+export const PHYSIO_KINDS = ["active", "passive", "group"] as const;
+export type PhysioKind = (typeof PHYSIO_KINDS)[number];
 export type EntryType = (typeof ENTRY_TYPES)[number];
 
 //  pending    čeka odobrenje
@@ -21,6 +25,9 @@ const nurseEntrySchema = new mongoose.Schema(
     medicine: { type: mongoose.Schema.Types.ObjectId, ref: "Medicine", default: null },
     article: { type: mongoose.Schema.Types.ObjectId, ref: "Article", default: null },
     careTask: { type: mongoose.Schema.Types.ObjectId, ref: "CareTask", default: null },
+    /** Fizikalna terapija: vrsta i da li je vanredna (naplaćuje se) */
+    physioKind: { type: String, enum: [...PHYSIO_KINDS, null], default: null },
+    extra: { type: Boolean, default: false },
     /** Naziv u trenutku unosa (ostaje i ako se lek/usluga kasnije preimenuje ili obriše) */
     name: { type: String, required: true },
     amount: { type: Number, required: true, min: 0 },

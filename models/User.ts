@@ -16,6 +16,7 @@ const ACTIVE_ROLES = [
   "nurse",
   "doctor",
   "social-worker",
+  "physiotherapist",
 ] as const;
 
 const ALL_ROLES = [...ACTIVE_ROLES, ...PASSIVE_ROLES];

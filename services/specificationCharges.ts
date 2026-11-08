@@ -187,7 +187,7 @@ interface UpsertInput {
   amount: number;
   price: number;
   entry: EntryInput;
-  extra?: { analyses?: Array<{ _id: Types.ObjectId; name: string; price: number }> };
+  extra?: { analyses?: Array<{ _id: Types.ObjectId; name: string; price: number }>; form?: string };
 }
 
 function upsertItem(spec: SpecificationDoc, { category, ref, refId, name, amount, price, entry, extra = {} }: UpsertInput) {
@@ -196,6 +196,7 @@ function upsertItem(spec: SpecificationDoc, { category, ref, refId, name, amount
   );
 
   if (item) {
+    if (extra.form) item.form = extra.form;
     item.amount = round2((item.amount || 0) + amount);
     item.price = round2((item.price || 0) + price);
     item.date = new Date();
@@ -297,6 +298,7 @@ export async function consumeForPatient(kindName: ConsumableKindName, { patientI
           amount: homeUsed,
           price,
           entry: { usedRecord: usedRecord._id, homeAmount: homeUsed, familyAmount: familyUsed, price, createdBy: author._id },
+          extra: kindName === "medicine" ? { form: (item as { form?: string }).form || "oral" } : {},
         })
       ));
     }
@@ -383,11 +385,11 @@ export async function addExtraCharge(spec: SpecificationDoc, { label, amount, us
 // vratio na odobrenje ako se stavka obriše.
 export async function addServiceCharge(
   spec: SpecificationDoc,
-  { name, times, unitPrice, createdBy }: { name: string; times: number; unitPrice: number; createdBy: Types.ObjectId }
+  { name, times, unitPrice, createdBy, category = "care" }: { name: string; times: number; unitPrice: number; createdBy: Types.ObjectId; category?: "care" | "physio" }
 ) {
   const price = round2(times * Math.max(Number(unitPrice) || 0, 0));
   const { spec: saved, result: itemId } = await mutateSpec(spec, (s) => {
-    s.items.push({ name, category: "care", amount: times, price, date: new Date(), entries: [{ price, createdBy }] });
+    s.items.push({ name, category, amount: times, price, date: new Date(), entries: [{ price, createdBy }] });
     return s.items[s.items.length - 1]!._id;
   });
   return { specification: saved, itemId, price };
@@ -413,7 +415,7 @@ export async function removeSpecItem(specId: Id, itemId: Id) {
   const entries = removed.entries || [];
   const kind = removed.category === "medicine" ? KINDS.medicine : removed.category === "articles" ? KINDS.article : null;
   const usedIds = entries.map((e) => e.usedRecord).filter(Boolean);
-  let fullyReverted = removed.category === "extra" || removed.category === "care";
+  let fullyReverted = removed.category === "extra" || removed.category === "care" || removed.category === "physio";
 
   const refId = kind ? removed[kind.ref] : null;
   if (kind && refId && entries.length > 0) {
@@ -454,7 +456,7 @@ export async function setSpecItemAmount(specId: Id, itemId: Id, amountInput: unk
   const delta = round2(amount - current);
   const oldUnit = current > 0 ? (Number(item.price) || 0) / current : Number(item.price) || 0;
   // Cena po komadu se menja samo za negu i dodatne troškove (lekovi/artikli/analize imaju cenu iz cenovnika)
-  const priced = item.category === "care" || item.category === "extra";
+  const priced = item.category === "care" || item.category === "extra" || item.category === "physio";
   const newUnit = priced && unitPriceInput !== undefined && unitPriceInput !== null && unitPriceInput !== "" ? round2(unitPriceInput) : null;
   if (newUnit !== null && newUnit < 0) throw httpError(400, "Cena ne može biti negativna.");
   if (delta === 0 && (newUnit === null || newUnit === round2(oldUnit))) return spec;

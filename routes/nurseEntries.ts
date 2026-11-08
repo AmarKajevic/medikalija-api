@@ -4,7 +4,7 @@ import { requireManager, requireRole } from "../middleware/requireRole.js";
 import { accept, acceptBulk, cancel, create, list, pendingSummary, reject } from "../controllers/nurseEntryController.js";
 
 const router = express.Router();
-const staff = requireRole("admin", "main-nurse", "nurse", "doctor");
+const staff = requireRole("admin", "main-nurse", "nurse", "doctor", "physiotherapist");
 
 router.use(authMiddleware, staff);
 

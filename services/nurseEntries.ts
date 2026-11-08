@@ -12,7 +12,7 @@ import Medicine from "../models/Medicine.js";
 import Article from "../models/Articles.js";
 import Patient from "../models/Patient.js";
 import CareTask from "../models/CareTask.js";
-import NurseEntry, { ENTRY_TYPES, type EntryType, type NurseEntryDoc } from "../models/NurseEntry.js";
+import NurseEntry, { ENTRY_TYPES, type EntryType, type NurseEntryDoc, PHYSIO_KINDS, type PhysioKind } from "../models/NurseEntry.js";
 import User, { type UserAttrs } from "../models/User.js";
 import { isManagerRole } from "../middleware/requireRole.js";
 import { httpError } from "../utils/errors.js";
@@ -23,7 +23,10 @@ type Actor = HydratedDocument<UserAttrs>;
 
 export interface EntryInput {
   type: unknown;
-  itemId: unknown;
+  itemId?: unknown;
+  /** Fizikalna terapija: "active" | "passive" | "group" i da li je vanredna */
+  physioKind?: unknown;
+  extra?: unknown;
   amount?: unknown;
   note?: unknown;
   performedAt?: unknown;
@@ -34,6 +37,13 @@ const MAX_ENTRIES_PER_REQUEST = 50;
 const STALE_LOCK_MS = 2 * 60_000;
 
 const MODEL_BY_TYPE = { medicine: Medicine, article: Article, care: CareTask } as const;
+
+export const PHYSIO_LABEL: Record<PhysioKind, string> = {
+  active: "Individualna aktivna fizikalna terapija",
+  passive: "Individualna pasivna fizikalna terapija",
+  group: "Grupna fizikalna terapija",
+};
+const canLogPhysio = (role: string) => role === "physiotherapist" || isManagerRole(role);
 
 function parsePerformedAt(value: unknown): Date {
   if (value === undefined || value === null || value === "") return new Date();
@@ -47,6 +57,28 @@ function parsePerformedAt(value: unknown): Date {
 async function buildEntry(patientId: Types.ObjectId, input: EntryInput, user: Actor) {
   const type = input.type as EntryType;
   if (!ENTRY_TYPES.includes(type)) throw httpError(400, "Nepoznata vrsta unosa.");
+
+  // Fizioterapeut unosi samo fizikalnu terapiju; nju (osim uprave) unosi samo fizioterapeut
+  if (type === "physio") {
+    if (!canLogPhysio(user.role)) throw httpError(403, "Fizikalnu terapiju unosi fizioterapeut.");
+    const kind = input.physioKind as PhysioKind;
+    if (!PHYSIO_KINDS.includes(kind)) throw httpError(400, "Izaberite vrstu fizikalne terapije.");
+    const extra = input.extra === true;
+    return {
+      patient: patientId,
+      type,
+      physioKind: kind,
+      extra,
+      name: `${PHYSIO_LABEL[kind]}${extra ? " (vanredna)" : ""}`,
+      amount: 1,
+      note: typeof input.note === "string" ? input.note.trim().slice(0, 500) : "",
+      performedAt: parsePerformedAt(input.performedAt),
+      createdBy: user._id,
+      // Redovna se ne naplaćuje (samo se beleži); vanredna čeka cenu i odobrenje uprave
+      status: extra ? ("pending" as const) : ("logged" as const),
+    };
+  }
+  if (user.role === "physiotherapist") throw httpError(403, "Fizioterapeut unosi samo fizikalnu terapiju.");
 
   const amount = round2(input.amount ?? 1);
   if (!(amount > 0)) throw httpError(400, "Količina mora biti veća od nule.");
@@ -87,7 +119,7 @@ export async function createEntries(patientId: unknown, inputs: EntryInput[], us
   if (!isManagerRole(user.role)) return { entries: created, applied: [] as AcceptResult[] };
 
   const applied: AcceptResult[] = [];
-  for (const entry of created.filter((e) => e.status === "pending")) {
+  for (const entry of created.filter((e) => e.status === "pending" && e.type !== "physio")) {
     applied.push(await acceptEntry(entry._id, user, undefined, specificationId).catch((err: Error) => ({ id: String(entry._id), ok: false as const, message: err.message })));
   }
   return { entries: await NurseEntry.find({ _id: { $in: created.map((e) => e._id) } }), applied };
@@ -110,7 +142,7 @@ async function claim(entryId: unknown) {
 }
 
 /** Prihvata unos: naplaćuje ga u aktivnoj specifikaciji. `amount` ispravlja količinu sestre. */
-export async function acceptEntry(entryId: unknown, user: Actor, amount?: unknown, targetSpecificationId?: unknown): Promise<AcceptResult> {
+export async function acceptEntry(entryId: unknown, user: Actor, amount?: unknown, targetSpecificationId?: unknown, priceInput?: unknown): Promise<AcceptResult> {
   const id = String(entryId);
   const entry = await claim(entryId).catch(() => null);
   if (!entry) {
@@ -132,7 +164,17 @@ export async function acceptEntry(entryId: unknown, user: Actor, amount?: unknow
     let specificationId: Types.ObjectId | null = null;
     const messages: string[] = [];
 
-    if (entry.type === "medicine" || entry.type === "article") {
+    if (entry.type === "physio") {
+      // Vanredna fizikalna terapija: cenu (RSD) određuje uprava pri odobravanju
+      const price = priceInput === undefined || priceInput === null || priceInput === "" ? NaN : round2(priceInput);
+      if (!(price >= 0)) throw httpError(400, "Unesite cenu vanredne fizikalne terapije.");
+      const spec = await resolveTargetSpecification(entry.patient, { at: entry.performedAt, specificationId: targetSpecificationId });
+      specificationId = spec._id;
+      const res = await addServiceCharge(spec, { name: entry.name, times: qty, unitPrice: price, createdBy: author._id, category: "physio" });
+      specItems.push(res.itemId);
+      charged += res.price;
+      messages.push("Fizikalna terapija je dodata u specifikaciju.");
+    } else if (entry.type === "medicine" || entry.type === "article") {
       const itemId = entry.type === "medicine" ? entry.medicine : entry.article;
       // U period u koji pada dan kad je dato (npr. period specifikacije, ako je istekao)
       const res = await consumeForPatient(entry.type, { patientId: entry.patient, itemId: String(itemId), amount: qty, user, performedBy: author, at: entry.performedAt, specificationId: targetSpecificationId });
@@ -208,13 +250,13 @@ async function entryAuthor(entry: NurseEntryDoc) {
 }
 
 /** Više unosa odjednom; svaki se obrađuje zasebno i vraća svoj ishod. */
-export async function acceptMany(items: Array<{ id: unknown; amount?: unknown }>, user: Actor) {
+export async function acceptMany(items: Array<{ id: unknown; amount?: unknown; price?: unknown }>, user: Actor) {
   if (!Array.isArray(items) || items.length === 0) throw httpError(400, "Nema izabranih unosa.");
   if (items.length > 200) throw httpError(400, "Previše unosa odjednom.");
   const results: AcceptResult[] = [];
-  for (const { id, amount } of items) {
+  for (const { id, amount, price } of items) {
     try {
-      results.push(await acceptEntry(id, user, amount));
+      results.push(await acceptEntry(id, user, amount, undefined, price));
     } catch (err) {
       results.push({ id: String(id), ok: false, message: (err as Error).message });
     }
