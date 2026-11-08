@@ -25,9 +25,13 @@ import {
 // Traži specifikaciju za tačan kalendarski opseg. Poređenje je tolerantno (±12h)
 // jer stari zapisi u bazi mogu biti sačuvani kao lokalna ponoć (22:00Z/23:00Z)
 // umesto kao UTC ponoć.
-function findSpecForRange(patientId: Id, startDate: Date, endDate: Date) {
+// Vanstandardni periodi se nikad ne poklapaju sa redovnim (i obrnuto)
+const STANDARD = { nonStandard: { $ne: true } };
+
+function findSpecForRange(patientId: Id, startDate: Date, endDate: Date, nonStandard = false) {
   return Specification.findOne({
     patientId,
+    ...(nonStandard ? { nonStandard: true } : STANDARD),
     startDate: sameDayQuery(startDate),
     endDate: sameDayQuery(endDate),
   });
@@ -36,14 +40,14 @@ function findSpecForRange(patientId: Id, startDate: Date, endDate: Date) {
 // Vraća postojeću specifikaciju za opseg ili je kreira. Upsert je atomičan, pa
 // dva paralelna zahteva (npr. dve sestre istovremeno dodaju lek) ne prave
 // duplikat istog perioda.
-async function findOrCreateSpecForRange(patientId: Id, startDate: Date, endDate: Date): Promise<SpecificationDoc> {
-  const existing = await findSpecForRange(patientId, startDate, endDate);
+async function findOrCreateSpecForRange(patientId: Id, startDate: Date, endDate: Date, nonStandard = false): Promise<SpecificationDoc> {
+  const existing = await findSpecForRange(patientId, startDate, endDate, nonStandard);
   if (existing) return existing;
 
   return Specification.findOneAndUpdate(
-    { patientId, startDate, endDate },
+    { patientId, startDate, endDate, ...(nonStandard ? { nonStandard: true } : STANDARD) },
     // patientId/startDate/endDate se pri insertu preuzimaju iz filtera
-    { $setOnInsert: { items: [], totalPrice: 0, isActive: false } },
+    { $setOnInsert: { items: [], totalPrice: 0, isActive: false, nonStandard } },
     { new: true, upsert: true }
   );
 }
@@ -100,7 +104,7 @@ export function buildPeriodChain(admission: Date | null, specs: SpecificationDoc
 
 async function loadPeriodChain(patientId: Id, untilDay: Date, patientDoc?: PatientDoc | null) {
   const patient = patientDoc ?? (await Patient.findById(patientId));
-  const specs = await Specification.find({ patientId });
+  const specs = await Specification.find({ patientId, ...STANDARD });
   return buildPeriodChain(normalizeStoredDay(patient?.admissionDate), specs, untilDay);
 }
 
@@ -187,7 +191,7 @@ export async function getBillingPeriodSpecification(patientId: Id, activeSpec?: 
   if (!activeStart) return null;
   const end = addDays(activeStart, -1);
 
-  const existing = await Specification.findOne({ patientId, _id: { $ne: active._id }, endDate: sameDayQuery(end) }).sort({ startDate: -1 });
+  const existing = await Specification.findOne({ patientId, ...STANDARD, _id: { $ne: active._id }, endDate: sameDayQuery(end) }).sort({ startDate: -1 });
   if (existing) return existing;
 
   // Inače: period iz lanca koji se završava dan pre aktivnog
@@ -218,6 +222,7 @@ export async function resolveTargetSpecification(patientId: Id, { specificationI
     if (!Types.ObjectId.isValid(String(specificationId))) throw httpError(400, "Neispravan period.");
     const chosen = await Specification.findOne({ _id: specificationId, patientId });
     if (!chosen) throw httpError(404, "Period nije pronađen.");
+    if (chosen.nonStandard) return chosen; // ručno izabran vanstandardni period
     const chosenStart = normalizeStoredDay(chosen.startDate);
     const activeStart = normalizeStoredDay(active.startDate);
     if (!chosenStart || !activeStart || chosenStart > activeStart) throw httpError(409, "Stavke se ne dodaju u budući period.");
@@ -229,7 +234,7 @@ export async function resolveTargetSpecification(patientId: Id, { specificationI
     if (billing && inRange(billing, day)) return billing;
     const activeStart = normalizeStoredDay(active.startDate);
     if (activeStart && day < activeStart) {
-      const older = await Specification.find({ patientId, _id: { $ne: active._id } }).sort({ startDate: -1 });
+      const older = await Specification.find({ patientId, ...STANDARD, _id: { $ne: active._id } }).sort({ startDate: -1 });
       const match = older.find((s) => inRange(s, day));
       if (match) return match;
     }
@@ -346,7 +351,15 @@ export async function changeSpecificationDates(patientId: Id, specId: unknown, s
   const end = parseCalendarDay(endDate);
   if (!start || !end || end < start) throw httpError(400, "Neispravan opseg datuma");
 
-  const all = dated(await Specification.find({ patientId }));
+  const own = await Specification.findOne({ _id: specId, patientId });
+  if (!own) throw httpError(404, "Specifikacija nije pronađena");
+  if (own.nonStandard) {
+    // Van redovnog niza: menja se samo on, ostali periodi se ne diraju
+    await Specification.updateOne({ _id: own._id }, { $set: { startDate: start, endDate: end } });
+    return (await Specification.findById(own._id))!;
+  }
+
+  const all = dated(await Specification.find({ patientId, ...STANDARD }));
   const target = all.find((x) => x.spec._id.equals(String(specId)));
   if (!target) throw httpError(404, "Specifikacija nije pronađena");
 
@@ -391,4 +404,20 @@ export async function changeSpecificationDates(patientId: Id, specId: unknown, s
   const fresh = await Specification.findById(target.spec._id);
   if (!fresh) throw httpError(404, "Specifikacija nije pronađena");
   return fresh;
+}
+
+// ---------- Vanstandardni periodi ----------
+/** Vanstandardni periodi pacijenta, od najnovijeg */
+export async function listNonStandardPeriods(patientId: Id): Promise<SpecificationDoc[]> {
+  return Specification.find({ patientId, nonStandard: true }).sort({ startDate: -1 });
+}
+
+/** Otvara (ili pravi) vanstandardni period za ručno izabrane datume; aktivan period se ne menja */
+export async function openNonStandardPeriod(patientId: Id, startDate: unknown, endDate: unknown): Promise<SpecificationDoc> {
+  const patient = await Patient.findById(patientId);
+  if (!patient) throw httpError(404, "Pacijent nije pronađen");
+  const start = parseCalendarDay(startDate);
+  const end = parseCalendarDay(endDate);
+  if (!start || !end || end < start) throw httpError(400, "Neispravan opseg datuma");
+  return findOrCreateSpecForRange(patientId, start, end, true);
 }

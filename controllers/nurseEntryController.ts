@@ -14,8 +14,9 @@ const populate = <Q extends { populate: (path: string, select: string) => Q }>(q
 // POST /api/nurse-entries  { patientId, entries: [{ type, itemId, amount, note, performedAt }] }
 export const create = async (req: Request, res: Response) => {
   try {
-    const { patientId, entries } = req.body ?? {};
-    const result = await createEntries(patientId, entries, req.user);
+    const { patientId, entries, specificationId } = req.body ?? {};
+    // Uprava iz specifikacije bira period; sestre ne biraju (unos ide na odobrenje)
+    const result = await createEntries(patientId, entries, req.user, isManagerRole(req.user.role) ? specificationId : undefined);
     const failed = result.applied.filter((a) => !a.ok);
     const pending = result.entries.filter((e) => e.status === "pending").length;
     const message = isManagerRole(req.user.role)

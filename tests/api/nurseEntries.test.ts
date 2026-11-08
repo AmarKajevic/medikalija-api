@@ -73,7 +73,7 @@ describe("unos sestre", () => {
     assert.equal(entry.name, "Andol");
   });
 
-  test("usluga bez naplate se samo beleži, naplativa čeka", async () => {
+  test("svaka usluga nege čeka odobrenje (i bez cene)", async () => {
     const free = await CareTask.create({ name: "Promenjena posteljina" });
     const diaper = await Article.create({ name: "Pelene", price: 85, quantity: 100 });
     const paid = await CareTask.create({ name: "Promenjene pelene", article: diaper._id, articleAmount: 1 });
@@ -84,7 +84,22 @@ describe("unos sestre", () => {
     ]);
     assert.equal(res.status, 201);
     assert.equal(res.body.message, "Poslato upravi na odobrenje.");
-    assert.deepEqual(res.body.entries.map((e: { status: string }) => e.status).sort(), ["logged", "pending"]);
+    assert.deepEqual(res.body.entries.map((e: { status: string }) => e.status).sort(), ["pending", "pending"]);
+  });
+
+  test("nega bez cene ulazi u specifikaciju kao 'Nega' (0 RSD); uprava upisuje cenu", async () => {
+    const free = await CareTask.create({ name: "Kupanje" });
+    const [entry] = (await submit(nurse, [{ type: "care", itemId: String(free._id), amount: 2 }])).body.entries;
+    const accepted = await request(app).post(`/api/nurse-entries/${entry._id}/accept`).set(authHeader(admin)).send({});
+    assert.equal(accepted.status, 200, accepted.body.message);
+    const s = await spec();
+    const item = must(s.items.find((i: { name?: string | null }) => i.name === "Kupanje"));
+    assert.equal(item.category, "care");
+    assert.equal(item.amount, 2);
+    assert.equal(item.price, 0);
+    const priced = await request(app).patch(`/api/specification/${s._id}/item/${item._id}`).set(authHeader(admin)).send({ amount: 2, unitPrice: 300 });
+    assert.equal(priced.status, 200, priced.body.message);
+    assert.equal(priced.body.specification.totalPrice, 600);
   });
 
   test("jedan neispravan unos ne upisuje ni ostale", async () => {

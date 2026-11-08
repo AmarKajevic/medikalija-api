@@ -207,7 +207,53 @@ describe("ručna izmena datuma perioda", () => {
   });
 });
 
+describe("vanstandardni period", () => {
+  test("ručni datumi van redovnog niza: prima stavke, ne pomera redovne periode", async () => {
+    const { patient, active, billing } = await setup(66);
+    const before = (await get(`/api/specification/${patient._id}/past-periods`)).body.periods;
+    // Preklapa se sa periodom specifikacije, ali ga ne dira
+    const opened = await post(`/api/specification/${patient._id}/non-standard`, { startDate: key(day(-20)), endDate: key(day(-15)) });
+    assert.equal(opened.status, 200, opened.body.message);
+    const ns = opened.body.specification;
+    assert.equal(ns.nonStandard, true);
+    assert.equal(ns.isActive, false);
+
+    const again = await post(`/api/specification/${patient._id}/non-standard`, { startDate: key(day(-20)), endDate: key(day(-15)) });
+    assert.equal(again.body.specification._id, ns._id, "isti datumi otvaraju isti period");
+
+    const med = await Medicine.create({ name: "Andol", pricePerUnit: 50, quantity: 10 });
+    const use = await post("/api/medicine/use", { patientId: String(patient._id), medicineId: String(med._id), amount: 1, specificationId: ns._id });
+    assert.equal(use.status, 200, use.body.message);
+    assert.equal(use.body.specification._id, ns._id);
+
+    assert.equal((await get(`/api/specification/${patient._id}`)).body.specification._id, active._id);
+    assert.equal((await get(`/api/specification/${patient._id}/billing-period`)).body.specification._id, billing._id);
+    assert.deepEqual((await get(`/api/specification/${patient._id}/past-periods`)).body.periods, before, "raniji periodi isti");
+    const list = (await get(`/api/specification/${patient._id}/non-standard`)).body.specifications;
+    assert.deepEqual(list.map((s: { _id: string }) => s._id), [ns._id]);
+
+    // Izmena datuma menja samo njega
+    const changed = await request(app).put(`/api/specification/${patient._id}/periods/${ns._id}`).set(authHeader(admin)).send({ startDate: key(day(-22)), endDate: key(day(-15)) });
+    assert.equal(changed.status, 200);
+    assert.equal(key(changed.body.specification.startDate), key(day(-22)));
+    assert.equal(key((await get(`/api/specification/view/${billing._id}`)).body.specification.endDate), key(billing.endDate));
+    assert.equal((await post(`/api/specification/${patient._id}/non-standard`, { startDate: key(day(-1)), endDate: key(day(-5)) })).status, 400);
+  });
+});
+
 describe("obračun: dug i smeštaj su opcioni", () => {
+  test("vanstandardni period smeštaja: opcion, po srednjem kursu, ulazi u ukupno", async () => {
+    await GlobalSetting.create({ lowerExchangeRate: 100, middleExchangeRate: 120 });
+    const { active } = await setup(5);
+    const on = (await post(`/api/specification/${active._id}/billing`, { previousDebtEUR: 0, nextLodgingEUR: 0, earlyLodgingEUR: 200, includeEarlyLodging: true })).body.specification.billing;
+    assert.equal(on.includeEarlyLodging, true);
+    assert.equal(on.earlyLodgingRSD, 24000);
+    assert.equal(on.totalEUR, 200);
+    const off = (await post(`/api/specification/${active._id}/billing`, { earlyLodgingEUR: 200, includeEarlyLodging: false })).body.specification.billing;
+    assert.equal(off.earlyLodgingEUR, 0);
+    assert.equal(off.totalRSD, 0);
+  });
+
   test("isključen dug se ne naplaćuje; smeštaj uključen", async () => {
     await GlobalSetting.create({ lowerExchangeRate: 100, middleExchangeRate: 120 });
     const { active } = await setup(5);
