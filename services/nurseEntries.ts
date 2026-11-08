@@ -12,6 +12,7 @@ import Medicine from "../models/Medicine.js";
 import Article from "../models/Articles.js";
 import Patient from "../models/Patient.js";
 import CareTask from "../models/CareTask.js";
+import PhysioPrice from "../models/PhysioPrice.js";
 import NurseEntry, { ENTRY_TYPES, type EntryType, type NurseEntryDoc, PHYSIO_KINDS, type PhysioKind } from "../models/NurseEntry.js";
 import User, { type UserAttrs } from "../models/User.js";
 import { isManagerRole } from "../middleware/requireRole.js";
@@ -142,7 +143,7 @@ async function claim(entryId: unknown) {
 }
 
 /** Prihvata unos: naplaćuje ga u aktivnoj specifikaciji. `amount` ispravlja količinu sestre. */
-export async function acceptEntry(entryId: unknown, user: Actor, amount?: unknown, targetSpecificationId?: unknown, priceInput?: unknown): Promise<AcceptResult> {
+export async function acceptEntry(entryId: unknown, user: Actor, amount?: unknown, targetSpecificationId?: unknown): Promise<AcceptResult> {
   const id = String(entryId);
   const entry = await claim(entryId).catch(() => null);
   if (!entry) {
@@ -165,9 +166,11 @@ export async function acceptEntry(entryId: unknown, user: Actor, amount?: unknow
     const messages: string[] = [];
 
     if (entry.type === "physio") {
-      // Vanredna fizikalna terapija: cenu (RSD) određuje uprava pri odobravanju
-      const price = priceInput === undefined || priceInput === null || priceInput === "" ? NaN : round2(priceInput);
-      if (!(price >= 0)) throw httpError(400, "Unesite cenu vanredne fizikalne terapije.");
+      // Vanredna fizikalna terapija: cena iz cenovnika koji admin unosi unapred
+      const kind = entry.physioKind as PhysioKind;
+      const listed = await PhysioPrice.findOne({ kind }).lean();
+      if (!listed) throw httpError(400, `Cena za „${PHYSIO_LABEL[kind] ?? "terapiju"}” nije uneta. Admin je unosi u „Cene fizioterapije”.`);
+      const price = round2(listed.priceRSD);
       const spec = await resolveTargetSpecification(entry.patient, { at: entry.performedAt, specificationId: targetSpecificationId });
       specificationId = spec._id;
       const res = await addServiceCharge(spec, { name: entry.name, times: qty, unitPrice: price, createdBy: author._id, category: "physio" });
@@ -250,13 +253,13 @@ async function entryAuthor(entry: NurseEntryDoc) {
 }
 
 /** Više unosa odjednom; svaki se obrađuje zasebno i vraća svoj ishod. */
-export async function acceptMany(items: Array<{ id: unknown; amount?: unknown; price?: unknown }>, user: Actor) {
+export async function acceptMany(items: Array<{ id: unknown; amount?: unknown }>, user: Actor) {
   if (!Array.isArray(items) || items.length === 0) throw httpError(400, "Nema izabranih unosa.");
   if (items.length > 200) throw httpError(400, "Previše unosa odjednom.");
   const results: AcceptResult[] = [];
-  for (const { id, amount, price } of items) {
+  for (const { id, amount } of items) {
     try {
-      results.push(await acceptEntry(id, user, amount, undefined, price));
+      results.push(await acceptEntry(id, user, amount));
     } catch (err) {
       results.push({ id: String(id), ok: false, message: (err as Error).message });
     }

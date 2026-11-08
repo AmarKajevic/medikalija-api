@@ -49,7 +49,6 @@ router.delete(
   requireManager,
   async (req: Request, res: Response) => {
 
-    console.log("DELETE LEKOVI HIT! Patient:", param(req, "patientId"));
 
     try {
       await UsedMedicine.deleteMany({ patient: param(req, "patientId") });

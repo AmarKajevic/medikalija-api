@@ -118,7 +118,7 @@ test("raspored: označava prošle i trenutni period", () => {
   assert.equal(periods.filter((p) => p.isPast).length, 4);
 });
 
-test("horizont: 10 godina od danas i za davno primljene pacijente", () => {
-  assert.equal(key(futureScheduleHorizon(day("2018-01-01"), day("2026-11-05"))), "2036-11-05");
-  assert.equal(key(futureScheduleHorizon(day("2027-01-01"), day("2026-11-05"))), "2037-01-01");
+test("horizont: 20 godina od danas i za davno primljene pacijente", () => {
+  assert.equal(key(futureScheduleHorizon(day("2018-01-01"), day("2026-11-05"))), "2046-11-05");
+  assert.equal(key(futureScheduleHorizon(day("2027-01-01"), day("2026-11-05"))), "2047-01-01");
 });

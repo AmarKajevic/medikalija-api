@@ -207,6 +207,39 @@ describe("ručna izmena datuma perioda", () => {
   });
 });
 
+describe("zatvorene specifikacije", () => {
+  test("otpušten pacijent: u izabranu zatvorenu specifikaciju može da se doda; bez izbora ne", async () => {
+    const { patient, active } = await setup(10);
+    const med = await Medicine.create({ name: "Andol", pricePerUnit: 50, quantity: 10 });
+    const out = await request(app).patch(`/api/patient/${patient._id}/discharge`).set(authHeader(admin)).send({ dischargeDate: key(day(0)) });
+    assert.equal(out.status, 200, out.body.message);
+    const use = (specificationId?: string) => post("/api/medicine/use", { patientId: String(patient._id), medicineId: String(med._id), amount: 1, specificationId });
+    assert.equal((await use()).status, 409, "bez izbora nema aktivnog perioda");
+    const res = await use(active._id);
+    assert.equal(res.status, 200, res.body.message);
+    assert.equal(res.body.specification._id, active._id);
+    const other = await createPatient();
+    const foreign = (await get(`/api/specification/${other._id}`)).body.specification;
+    assert.equal((await use(foreign._id)).status, 409, "tuđa specifikacija");
+  });
+});
+
+describe("istorija specifikacija", () => {
+  test("lista perioda bez stavki (samo broj stavki i iznosi), najnoviji prvi", async () => {
+    const { patient, active, billing } = await setup(45);
+    await post(`/api/specification/${billing._id}/add-costs`, { extraCostAmount: 300, extraCostLabel: "Prevoz" });
+    await post(`/api/specification/${billing._id}/add-costs`, { extraCostAmount: 200, extraCostLabel: "Frizer" });
+    const res = await get(`/api/specification/history/${patient._id}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.activeSpec._id, active._id);
+    const old = res.body.history.find((s: { _id: string }) => s._id === billing._id);
+    assert.equal(old.itemsCount, 2);
+    assert.equal(old.totalPrice, 500);
+    assert.equal(old.items, undefined, "stavke se ne šalju u listi");
+    assert.equal((await get("/api/specification/history/nije-id")).status, 400);
+  });
+});
+
 describe("vanstandardni period", () => {
   test("ručni datumi van redovnog niza: prima stavke, ne pomera redovne periode", async () => {
     const { patient, active, billing } = await setup(66);

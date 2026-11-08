@@ -23,5 +23,8 @@ const articleSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Dodavanje/porodične zalihe traže artikal po nazivu
+articleSchema.index({ name: 1 });
+
 const Article = mongoose.model("Article", articleSchema);
 export default Article;

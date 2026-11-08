@@ -149,7 +149,7 @@ const addMedicine = async (req: Request, res: Response) => {
  */
 const getMedicines = async (_req: Request, res: Response) => {
   try {
-    const medicines = await Medicine.find().sort({ name: 1 });
+    const medicines = await Medicine.find().sort({ name: 1 }).lean();
     return res.status(200).json({ success: true, medicines });
   } catch (error) {
     return res.status(500).json({ success: false, message: errorMessage(error) });
@@ -364,13 +364,15 @@ const getPatientMedicine = async (req: Request, res: Response) => {
   try {
     const patientId = param(req, "patientId");
 
-    const usedMedicine = await UsedMedicine.find({ patient: patientId })
-      .populate("medicine", "name pricePerUnit")
-      .populate("createdBy", "name role")
-      .sort({ createdAt: -1 });
-
-    const patientStock = await PatientMedicine.find({ patient: patientId })
-      .populate("medicine", "name");
+    // Dva nezavisna čitanja idu paralelno; lean = obični objekti (samo za prikaz)
+    const [usedMedicine, patientStock] = await Promise.all([
+      UsedMedicine.find({ patient: patientId })
+        .populate("medicine", "name pricePerUnit")
+        .populate("createdBy", "name role")
+        .sort({ createdAt: -1 })
+        .lean(),
+      PatientMedicine.find({ patient: patientId }).populate("medicine", "name").lean(),
+    ]);
 
     return res.status(200).json({
       success: true,

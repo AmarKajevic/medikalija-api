@@ -28,5 +28,8 @@ const medicineSchema = new mongoose.Schema(
 );
 
 
+// Dodavanje/porodične zalihe traže lek po nazivu
+medicineSchema.index({ name: 1 });
+
 const Medicine = mongoose.model("Medicine", medicineSchema);
 export default Medicine;

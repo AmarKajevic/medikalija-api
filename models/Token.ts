@@ -7,5 +7,9 @@ const tokenSchema = new mongoose.Schema({
 
 })
 
+// Osvežavanje sesije traži po tokenu; odjava/brisanje po korisniku
+tokenSchema.index({ token: 1 });
+tokenSchema.index({ user: 1 });
+
 const Token = mongoose.model("Token", tokenSchema);
 export default Token

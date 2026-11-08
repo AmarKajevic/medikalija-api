@@ -16,5 +16,8 @@ const UsedCombinationsSchema = new mongoose.Schema({
 
 },{timestamps: true});
 
+// Profil pacijenta: urađene analize, najnovije prve
+UsedCombinationsSchema.index({ patient: 1, createdAt: -1 });
+
 const UsedCombinations = mongoose.model("UsedCombinations", UsedCombinationsSchema);
 export default UsedCombinations;

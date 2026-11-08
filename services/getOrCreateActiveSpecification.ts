@@ -112,12 +112,15 @@ async function loadPeriodChain(patientId: Id, untilDay: Date, patientDoc?: Patie
 // Ako takav ne postoji (nov pacijent ili stari podaci bez flaga), samoispravljanje:
 // koristi se period po admissionDate + "danas" i taj period se markira kao
 // aktivan, tako da nema potrebe za posebnom migracionom skriptom.
-export async function getActiveSpecification(patientId: Id): Promise<SpecificationDoc | null> {
-  const patient = await Patient.findById(patientId);
+// Pacijent i aktivan zapis se čitaju paralelno (jedan put do baze umesto dva);
+// pozivalac koji već ima pacijenta prosleđuje ga.
+export async function getActiveSpecification(patientId: Id, patientDoc?: PatientDoc | null): Promise<SpecificationDoc | null> {
+  const [patient, existing] = await Promise.all([
+    patientDoc ?? Patient.findById(patientId),
+    Specification.findOne({ patientId, isActive: true }),
+  ]);
   if (!patient) return null;
   if (patient.dischargeDate) return null;
-
-  const existing = await Specification.findOne({ patientId, isActive: true });
   if (existing) return existing;
 
   const fallback = await getOrCreateActiveSpecification(patientId, patient);
@@ -215,7 +218,15 @@ const inRange = (spec: SpecificationDoc, day: Date) => {
 //  - inače aktivan period
 export async function resolveTargetSpecification(patientId: Id, { specificationId, at }: { specificationId?: unknown; at?: Date | null } = {}): Promise<SpecificationDoc> {
   const active = await getActiveSpecification(patientId);
-  if (!active) throw httpError(409, "Pacijent nema aktivnu specifikaciju (otpušten je ili ne postoji).");
+  if (!active) {
+    // Otpušten pacijent: nema aktivnog perioda, ali zatvorena specifikacija se može
+    // izmeniti kad je uprava izričito izabere (uz upozorenje u aplikaciji)
+    if (specificationId && Types.ObjectId.isValid(String(specificationId))) {
+      const chosen = await Specification.findOne({ _id: specificationId, patientId });
+      if (chosen) return chosen;
+    }
+    throw httpError(409, "Pacijent nema aktivnu specifikaciju (otpušten je ili ne postoji).");
+  }
 
   if (specificationId) {
     if (String(active._id) === String(specificationId)) return active;
@@ -274,10 +285,10 @@ export function buildSpecificationSchedule(admissionDate: DayInput, untilDay: Da
   }));
 }
 
-export const FUTURE_SCHEDULE_YEARS = 10;
+export const FUTURE_SCHEDULE_YEARS = 20;
 
-// Datum do kog se prikazuju budući periodi: 10 kalendarskih godina od danas
-// (sa prestupnim godinama), a najmanje 10 godina od prijema.
+// Datum do kog se prikazuju budući periodi: 20 kalendarskih godina od danas
+// (sa prestupnim godinama), a najmanje 20 godina od prijema.
 export function futureScheduleHorizon(admissionDate: DayInput, currentDay: Date = today()): Date {
   const admissionDay = normalizeStoredDay(admissionDate);
   const fromToday = addYears(currentDay, FUTURE_SCHEDULE_YEARS);
@@ -299,7 +310,7 @@ export interface PastPeriod {
 export async function listPastPeriods(patientId: Id): Promise<PastPeriod[]> {
   const patient = await Patient.findById(patientId);
   if (!patient) throw httpError(404, "Pacijent nije pronađen");
-  const active = patient.dischargeDate ? null : await getActiveSpecification(patientId);
+  const active = patient.dischargeDate ? null : await getActiveSpecification(patientId, patient);
   // Granica: početak aktivnog perioda; otpušten pacijent — dan posle otpusta
   const limit = normalizeStoredDay(active?.startDate) ?? addDays(normalizeStoredDay(patient.dischargeDate) ?? today(), 1);
 
@@ -332,7 +343,7 @@ export async function openPastPeriod(patientId: Id, startDate: unknown, endDate:
   const start = parseCalendarDay(startDate);
   const end = parseCalendarDay(endDate);
   if (!start || !end || end < start) throw httpError(400, "Neispravan opseg datuma");
-  const active = patient.dischargeDate ? null : await getActiveSpecification(patientId);
+  const active = patient.dischargeDate ? null : await getActiveSpecification(patientId, patient);
   const activeStart = normalizeStoredDay(active?.startDate);
   if (activeStart && start >= activeStart) throw httpError(409, "Izaberite period pre aktivnog.");
   return findOrCreateSpecForRange(patientId, start, end);

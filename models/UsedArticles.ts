@@ -15,5 +15,8 @@ const usedArticlesSchema = new mongoose.Schema({
 },
     {timestamps:true}
 )
+// Profil pacijenta: potrošnja, najnovija prva
+usedArticlesSchema.index({ patient: 1, createdAt: -1 });
+
 const UsedArticles = mongoose.model("UsedArticles", usedArticlesSchema)
 export default UsedArticles;

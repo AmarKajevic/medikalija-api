@@ -8,7 +8,7 @@ import { param } from "../utils/http.js";
 const getPatients = async (_req: Request, res: Response) => {
     try{
         // Poslednji dodati prvi (_id kao rezerva za stare zapise bez createdAt)
-        const patients = await Patient.find().populate("createdBy", "name role").sort({ createdAt: -1, _id: -1 })
+        const patients = await Patient.find().populate("createdBy", "name role").sort({ createdAt: -1, _id: -1 }).lean()
         return res.status(200).json({success: true, patients})
     }catch(error){
          return res.status(500).json({success: false, error: "get patient server error"})
