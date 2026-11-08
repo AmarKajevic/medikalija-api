@@ -46,6 +46,9 @@ const specificationSchema = new mongoose.Schema({
   startDate: { type: Date, required: true },
   endDate: { type: Date, required: true },
   isActive: { type: Boolean, default: false, index: true },
+  // Vanstandardni period: ručno izabrani datumi van redovnog niza perioda. Ne pomera
+  // redovne periode i u njega se ništa ne raspoređuje automatski (samo ručno).
+  nonStandard: { type: Boolean, default: false },
 
   // ❌ lodgingPrice više NE koristimo – uklonjeno
   // lodgingPrice: { type: Number, default: 0 },
@@ -66,6 +69,11 @@ const specificationSchema = new mongoose.Schema({
     includeLodging: { type: Boolean },
     nextLodgingEUR: { type: Number, default: 0 },
     nextLodgingRSD: { type: Number, default: 0 },
+
+    /** Vanstandardni period smeštaja (npr. dani pre početka perioda) — opciono, kao dug i smeštaj */
+    includeEarlyLodging: { type: Boolean },
+    earlyLodgingEUR: { type: Number, default: 0 },
+    earlyLodgingRSD: { type: Number, default: 0 },
 
     specEUR: { type: Number, default: 0 },             // specifikacija u evrima
     totalRSD: { type: Number, default: 0 },

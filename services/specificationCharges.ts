@@ -378,16 +378,16 @@ export async function addExtraCharge(spec: SpecificationDoc, { label, amount, us
   return saved;
 }
 
-// Naplata usluge nege (cena usluge × broj puta) kao zasebna stavka. Vraća i id
-// stavke, da bi se unos sestre vratio na odobrenje ako se stavka obriše.
+// Naplata usluge nege (cena usluge × broj puta) kao stavka "Nega". Cena može biti 0
+// (uprava je upisuje u specifikaciji). Vraća i id stavke, da bi se unos sestre
+// vratio na odobrenje ako se stavka obriše.
 export async function addServiceCharge(
   spec: SpecificationDoc,
   { name, times, unitPrice, createdBy }: { name: string; times: number; unitPrice: number; createdBy: Types.ObjectId }
 ) {
-  const price = round2(times * unitPrice);
-  if (!(price > 0)) throw httpError(400, "Usluga nema cenu.");
+  const price = round2(times * Math.max(Number(unitPrice) || 0, 0));
   const { spec: saved, result: itemId } = await mutateSpec(spec, (s) => {
-    s.items.push({ name, category: "extra", amount: times, price, date: new Date(), entries: [{ price, createdBy }] });
+    s.items.push({ name, category: "care", amount: times, price, date: new Date(), entries: [{ price, createdBy }] });
     return s.items[s.items.length - 1]!._id;
   });
   return { specification: saved, itemId, price };
@@ -413,7 +413,7 @@ export async function removeSpecItem(specId: Id, itemId: Id) {
   const entries = removed.entries || [];
   const kind = removed.category === "medicine" ? KINDS.medicine : removed.category === "articles" ? KINDS.article : null;
   const usedIds = entries.map((e) => e.usedRecord).filter(Boolean);
-  let fullyReverted = removed.category === "extra";
+  let fullyReverted = removed.category === "extra" || removed.category === "care";
 
   const refId = kind ? removed[kind.ref] : null;
   if (kind && refId && entries.length > 0) {
@@ -436,10 +436,167 @@ export async function removeSpecItem(specId: Id, itemId: Id) {
   return { specification: saved, fullyReverted };
 }
 
+// Menja naplaćenu količinu stavke.
+//  - lek/artikal: povećanje skida razliku sa stanja doma (novi zapis o potrošnji),
+//    smanjenje vraća razliku na stanje doma, od poslednjih dodavanja ka prvim
+//  - analize: broj ponavljanja (ceo broj), svako ponavljanje ima svoj zapis
+//  - ostalo (troškovi, nega): cena po komadu × količina
+// Količina 0 nije dozvoljena — za to postoji brisanje stavke.
+export async function setSpecItemAmount(specId: Id, itemId: Id, amountInput: unknown, user: Actor, unitPriceInput?: unknown) {
+  const amount = round2(amountInput);
+  if (!(amount > 0)) throw httpError(400, "Količina mora biti veća od 0. Za uklanjanje obrišite stavku.");
+  const spec = await Specification.findById(specId);
+  if (!spec) throw httpError(404, "Specifikacija nije pronađena.");
+  const item = spec.items.id(itemId);
+  if (!item) throw httpError(404, "Stavka nije pronađena.");
+
+  const current = round2(item.amount || 0);
+  const delta = round2(amount - current);
+  const oldUnit = current > 0 ? (Number(item.price) || 0) / current : Number(item.price) || 0;
+  // Cena po komadu se menja samo za negu i dodatne troškove (lekovi/artikli/analize imaju cenu iz cenovnika)
+  const priced = item.category === "care" || item.category === "extra";
+  const newUnit = priced && unitPriceInput !== undefined && unitPriceInput !== null && unitPriceInput !== "" ? round2(unitPriceInput) : null;
+  if (newUnit !== null && newUnit < 0) throw httpError(400, "Cena ne može biti negativna.");
+  if (delta === 0 && (newUnit === null || newUnit === round2(oldUnit))) return spec;
+  const unit = newUnit ?? oldUnit;
+  const kind = item.category === "medicine" ? KINDS.medicine : item.category === "articles" ? KINDS.article : null;
+  const refId = kind ? item[kind.ref] : null;
+  const hasEntries = (item.entries?.length ?? 0) > 0;
+  const findItem = (s: SpecificationDoc) => {
+    const it = s.items.id(itemId);
+    if (!it) throw httpError(404, "Stavka nije pronađena.");
+    return it;
+  };
+
+  // ---------- Lek / artikal sa zapisima o potrošnji ----------
+  if (kind && refId && hasEntries) {
+    if (delta > 0) {
+      const stock = await kind.Item.findById(refId);
+      if (!stock) throw httpError(404, kind === KINDS.medicine ? "Lek nije pronađen." : "Artikal nije pronađen.");
+      const unitPrice = unit || Number(stock[kind.priceField]) || 0;
+      const taken = await takeStock(kind.Item, { _id: refId }, delta);
+      if (!taken) throw httpError(400, `Nedovoljno ${kind.label} na stanju doma (traženo još ${delta}, dostupno ${round2(stock.quantity)}).`);
+      await syncPackages(kind, taken);
+      let usedId: Types.ObjectId | null = null;
+      try {
+        const used = await kind.Used.create({
+          patient: spec.patientId,
+          [kind.ref]: refId,
+          amount: delta,
+          familyAmount: 0,
+          homeAmount: delta,
+          fromFamily: false,
+          priceAtTheTime: unitPrice,
+          createdBy: user._id,
+          roleUsed: user.role,
+        });
+        usedId = used._id as Types.ObjectId;
+        const price = round2(delta * unitPrice);
+        const { spec: saved } = await mutateSpec(spec, (s) => {
+          const it = findItem(s);
+          it.amount = round2((it.amount || 0) + delta);
+          it.price = round2((it.price || 0) + price);
+          it.entries.push({ usedRecord: usedId, homeAmount: delta, familyAmount: 0, price, createdBy: user._id });
+        });
+        return saved;
+      } catch (err) {
+        await syncPackages(kind, await giveStock(kind.Item, { _id: refId }, delta));
+        if (usedId) await kind.Used.deleteOne({ _id: usedId });
+        throw err;
+      }
+    }
+
+    // Smanjenje: od poslednjeg dodavanja ka prvom
+    let returned = 0;
+    let changes: Array<{ id: unknown; take: number; remove: boolean }> = [];
+    const { spec: saved } = await mutateSpec(spec, (s) => {
+      const it = findItem(s);
+      returned = 0;
+      changes = [];
+      let remaining = -delta;
+      for (let i = it.entries.length - 1; i >= 0 && remaining > EPS; i--) {
+        const e = it.entries[i]!;
+        const home = e.homeAmount || 0;
+        const take = round2(Math.min(home, remaining));
+        if (take <= 0) continue;
+        e.price = round2((e.price || 0) - (home > 0 ? ((e.price || 0) * take) / home : 0));
+        e.homeAmount = round2(home - take);
+        remaining = round2(remaining - take);
+        returned = round2(returned + take);
+        const remove = e.homeAmount <= 0 && !((e.familyAmount || 0) > 0);
+        if (e.usedRecord) changes.push({ id: e.usedRecord, take, remove });
+        if (remove) e.deleteOne();
+      }
+      it.amount = amount;
+      it.price = round2(unit * amount);
+    });
+    if (returned > 0) await syncPackages(kind, await giveStock(kind.Item, { _id: refId }, returned));
+    for (const c of changes) {
+      if (c.remove) await kind.Used.deleteOne({ _id: c.id });
+      else await kind.Used.updateOne({ _id: c.id }, { $inc: { amount: -c.take, homeAmount: -c.take } });
+    }
+    const removedIds = changes.filter((c) => c.remove).map((c) => c.id);
+    if (removedIds.length) await reopenNurseEntries(removedIds, null);
+    return saved;
+  }
+
+  // ---------- Analize: ceo broj ponavljanja ----------
+  if (item.category === "combination") {
+    if (!Number.isInteger(amount)) throw httpError(400, "Broj analiza mora biti ceo broj.");
+    const analyses = (item.analyses ?? []).map((a) => ({ _id: a._id, name: a.name, price: Number(a.price) || 0 }));
+    const unitPrice = round2(unit || analyses.reduce((sum, a) => sum + a.price, 0));
+    if (delta > 0) {
+      const created = await UsedCombinations.insertMany(
+        Array.from({ length: delta }, () => ({ patient: spec.patientId, combination: item.combination, analyses, totalPriceAtTheTime: unitPrice, createdBy: user._id }))
+      );
+      try {
+        const { spec: saved } = await mutateSpec(spec, (s) => {
+          const it = findItem(s);
+          for (const c of created) it.entries.push({ usedRecord: c._id, price: unitPrice, createdBy: user._id });
+          it.amount = amount;
+          it.price = round2(unitPrice * amount);
+        });
+        return saved;
+      } catch (err) {
+        await UsedCombinations.deleteMany({ _id: { $in: created.map((c) => c._id) } });
+        throw err;
+      }
+    }
+    let removedIds: unknown[] = [];
+    const { spec: saved } = await mutateSpec(spec, (s) => {
+      const it = findItem(s);
+      removedIds = [];
+      for (let i = it.entries.length - 1; i >= 0 && removedIds.length < -delta; i--) {
+        const e = it.entries[i]!;
+        if (e.usedRecord) removedIds.push(e.usedRecord);
+        e.deleteOne();
+      }
+      it.amount = amount;
+      it.price = round2(unitPrice * amount);
+    });
+    if (removedIds.length) {
+      await UsedCombinations.deleteMany({ _id: { $in: removedIds } });
+      await reopenNurseEntries(removedIds, null);
+    }
+    return saved;
+  }
+
+  // ---------- Ostalo (nega, dodatni troškovi, stare stavke bez zapisa) ----------
+  const { spec: saved } = await mutateSpec(spec, (s) => {
+    const it = findItem(s);
+    it.amount = amount;
+    it.price = round2(unit * amount);
+    if (it.entries.length === 1) it.entries[0]!.price = it.price;
+  });
+  return saved;
+}
+
 // Unos sestre čija je naplata obrisana iz specifikacije vraća se na odobrenje.
 // Usluga koja je naplatila i artikal i cenu vraća se tek kad nestanu oba dela.
 async function reopenNurseEntries(usedIds: unknown[], specItemId: unknown) {
-  const linked = { status: "accepted", $or: [{ usedRecords: { $in: usedIds } }, { specItems: specItemId }] };
+  const or: Record<string, unknown>[] = [{ usedRecords: { $in: usedIds } }];
+  if (specItemId) or.push({ specItems: specItemId });
+  const linked = { status: "accepted", $or: or };
   const affected = await NurseEntry.find(linked, { _id: 1 });
   if (affected.length === 0) return;
   const ids = affected.map((e) => e._id);

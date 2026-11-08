@@ -5,13 +5,13 @@
 //  - ono što se naplaćuje čeka upravu: PRIHVATI → ista pravila kao kad uprava sama
 //    unosi (prvo porodično stanje, ostatak sa stanja doma u aktivnu specifikaciju);
 //    ODBIJ → ništa se ne naplaćuje i ništa se ne skida sa stanja
-//  - usluga bez naplate se samo beleži (status "logged")
+//  - svaka usluga nege ide na odobrenje i u specifikaciju (bez cene: stavka od 0 RSD, uprava upisuje cenu)
 //  - unos uprave se odmah primenjuje (uprava ne odobrava sama sebi)
 import type { HydratedDocument, Types } from "mongoose";
 import Medicine from "../models/Medicine.js";
 import Article from "../models/Articles.js";
 import Patient from "../models/Patient.js";
-import CareTask, { isBillableTask } from "../models/CareTask.js";
+import CareTask from "../models/CareTask.js";
 import NurseEntry, { ENTRY_TYPES, type EntryType, type NurseEntryDoc } from "../models/NurseEntry.js";
 import User, { type UserAttrs } from "../models/User.js";
 import { isManagerRole } from "../middleware/requireRole.js";
@@ -57,7 +57,6 @@ async function buildEntry(patientId: Types.ObjectId, input: EntryInput, user: Ac
   if (!item) throw httpError(404, type === "care" ? "Usluga nije pronađena." : type === "medicine" ? "Lek nije pronađen." : "Artikal nije pronađen.");
   if (type === "care" && item.active === false) throw httpError(400, `Usluga "${item.name}" više nije u upotrebi.`);
 
-  const billable = type !== "care" || isBillableTask(item);
   return {
     patient: patientId,
     type,
@@ -67,12 +66,12 @@ async function buildEntry(patientId: Types.ObjectId, input: EntryInput, user: Ac
     note: typeof input.note === "string" ? input.note.trim().slice(0, 500) : "",
     performedAt: parsePerformedAt(input.performedAt),
     createdBy: user._id,
-    status: billable ? ("pending" as const) : ("logged" as const),
+    status: "pending" as const,
   };
 }
 
-/** Beleži jedan ili više unosa za pacijenta. Unosi uprave se odmah primenjuju. */
-export async function createEntries(patientId: unknown, inputs: EntryInput[], user: Actor) {
+/** Beleži jedan ili više unosa za pacijenta. Unosi uprave se odmah primenjuju (u izabran period, ako je dat). */
+export async function createEntries(patientId: unknown, inputs: EntryInput[], user: Actor, specificationId?: unknown) {
   if (!Array.isArray(inputs) || inputs.length === 0) throw httpError(400, "Nema unosa.");
   if (inputs.length > MAX_ENTRIES_PER_REQUEST) throw httpError(400, "Previše unosa odjednom.");
 
@@ -89,7 +88,7 @@ export async function createEntries(patientId: unknown, inputs: EntryInput[], us
 
   const applied: AcceptResult[] = [];
   for (const entry of created.filter((e) => e.status === "pending")) {
-    applied.push(await acceptEntry(entry._id, user).catch((err: Error) => ({ id: String(entry._id), ok: false as const, message: err.message })));
+    applied.push(await acceptEntry(entry._id, user, undefined, specificationId).catch((err: Error) => ({ id: String(entry._id), ok: false as const, message: err.message })));
   }
   return { entries: await NurseEntry.find({ _id: { $in: created.map((e) => e._id) } }), applied };
 }
@@ -111,7 +110,7 @@ async function claim(entryId: unknown) {
 }
 
 /** Prihvata unos: naplaćuje ga u aktivnoj specifikaciji. `amount` ispravlja količinu sestre. */
-export async function acceptEntry(entryId: unknown, user: Actor, amount?: unknown): Promise<AcceptResult> {
+export async function acceptEntry(entryId: unknown, user: Actor, amount?: unknown, targetSpecificationId?: unknown): Promise<AcceptResult> {
   const id = String(entryId);
   const entry = await claim(entryId).catch(() => null);
   if (!entry) {
@@ -136,7 +135,7 @@ export async function acceptEntry(entryId: unknown, user: Actor, amount?: unknow
     if (entry.type === "medicine" || entry.type === "article") {
       const itemId = entry.type === "medicine" ? entry.medicine : entry.article;
       // U period u koji pada dan kad je dato (npr. period specifikacije, ako je istekao)
-      const res = await consumeForPatient(entry.type, { patientId: entry.patient, itemId: String(itemId), amount: qty, user, performedBy: author, at: entry.performedAt });
+      const res = await consumeForPatient(entry.type, { patientId: entry.patient, itemId: String(itemId), amount: qty, user, performedBy: author, at: entry.performedAt, specificationId: targetSpecificationId });
       usedRecords.push(res.usedRecord._id);
       specificationId = res.specification._id;
       charged = round2(res.homeUsed * (Number(res.usedRecord.priceAtTheTime) || 0));
@@ -144,20 +143,22 @@ export async function acceptEntry(entryId: unknown, user: Actor, amount?: unknow
     } else {
       const task = await CareTask.findById(entry.careTask);
       if (!task) throw httpError(404, "Usluga više ne postoji u katalogu.");
-      if (!isBillableTask(task)) throw httpError(400, "Usluga se više ne naplaćuje — odbijte unos.");
       // Proverava se pre bilo kakve izmene, da artikal ne bude skinut ako specifikacije nema
-      const spec = await resolveTargetSpecification(entry.patient, { at: entry.performedAt });
+      const spec = await resolveTargetSpecification(entry.patient, { at: entry.performedAt, specificationId: targetSpecificationId });
       specificationId = spec._id;
 
       // Prvo cena usluge (lako se povlači), pa artikal; ako artikla nema dovoljno,
       // naplata usluge se povlači i unos ostaje na čekanju — nema polovične naplate.
-      if (task.price > 0) {
+      // Usluga ide u specifikaciju ako ima cenu ili ako ne troši artikal (nega bez cene: 0 RSD,
+      // uprava upisuje cenu u specifikaciji); usluga koja samo troši artikal naplaćuje artikal
+      const hasArticle = !!task.article && task.articleAmount > 0;
+      if (task.price > 0 || !hasArticle) {
         const res = await addServiceCharge(spec, { name: task.name, times: qty, unitPrice: task.price, createdBy: author._id });
         specItems.push(res.itemId);
         charged += res.price;
         messages.push("Usluga je dodata u specifikaciju.");
       }
-      if (task.article && task.articleAmount > 0) {
+      if (hasArticle) {
         try {
           const res = await consumeForPatient("article", {
             patientId: entry.patient,

@@ -11,10 +11,12 @@ import {
   listPastPeriods,
   openPastPeriod,
   changeSpecificationDates,
+  listNonStandardPeriods,
+  openNonStandardPeriod,
 } from "../services/getOrCreateActiveSpecification.js";
 import GlobalSetting from "../models/GlobalSetting.js";
 import { nextPeriodAfter, normalizeStoredDay } from "../utils/dateUtils.js";
-import { MANAGER_ROLES, addExtraCharge, removeSpecItem } from "../services/specificationCharges.js";
+import { MANAGER_ROLES, addExtraCharge, removeSpecItem, setSpecItemAmount } from "../services/specificationCharges.js";
 import type { Request, Response } from "express";
 import { errorMessage, statusOf } from "../utils/errors.js";
 import { param } from "../utils/http.js";
@@ -55,6 +57,24 @@ const getPastPeriods = async (req: Request, res: Response) => {
   try {
     const periods = await listPastPeriods(param(req, "patientId"));
     return res.json({ success: true, periods });
+  } catch (err) {
+    return res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
+  }
+};
+
+// Vanstandardni periodi (ručni datumi van redovnog niza)
+const getNonStandardPeriods = async (req: Request, res: Response) => {
+  try {
+    return res.json({ success: true, specifications: await listNonStandardPeriods(param(req, "patientId")) });
+  } catch (err) {
+    return res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
+  }
+};
+
+const openNonStandard = async (req: Request, res: Response) => {
+  try {
+    const specification = await openNonStandardPeriod(param(req, "patientId"), req.body?.startDate, req.body?.endDate);
+    return res.json({ success: true, specification });
   } catch (err) {
     return res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
   }
@@ -169,10 +189,11 @@ const addCostsToSpecification = async (req: Request, res: Response) => {
 const saveBillingForSpecification = async (req: Request, res: Response) => {
   try {
     const id = param(req, "id");
-    const { previousDebtEUR, nextLodgingEUR } = req.body; // backend više ne očekuje kurseve
-    // Dug i smeštaj su opcioni: isključeni se ne naplaćuju i ne štampaju
+    const { previousDebtEUR, nextLodgingEUR, earlyLodgingEUR } = req.body; // backend više ne očekuje kurseve
+    // Dug, smeštaj i vanstandardni period smeštaja su opcioni: isključeni se ne naplaćuju i ne štampaju
     const includeDebt = req.body.includeDebt === undefined ? Number(previousDebtEUR) > 0 : req.body.includeDebt === true;
     const includeLodging = req.body.includeLodging === undefined ? Number(nextLodgingEUR) > 0 : req.body.includeLodging === true;
+    const includeEarlyLodging = req.body.includeEarlyLodging === undefined ? Number(earlyLodgingEUR) > 0 : req.body.includeEarlyLodging === true;
 
     const spec = await Specification.findById(id);
     if (!spec) {
@@ -186,13 +207,15 @@ const saveBillingForSpecification = async (req: Request, res: Response) => {
 
     const debtEUR = includeDebt ? Math.max(Number(previousDebtEUR) || 0, 0) : 0;
     const lodgingEUR = includeLodging ? Math.max(Number(nextLodgingEUR) || 0, 0) : 0;
+    const earlyEUR = includeEarlyLodging ? Math.max(Number(earlyLodgingEUR) || 0, 0) : 0;
     const specTotalRSD = spec.totalPrice ?? 0;
 
     const specEUR = low > 0 ? specTotalRSD / low : 0;
     const debtRSD = mid > 0 ? debtEUR * mid : 0;
     const lodgingRSD = mid > 0 ? lodgingEUR * mid : 0;
-    const totalRSD = specTotalRSD + debtRSD + lodgingRSD;
-    const totalEUR = specEUR + debtEUR + lodgingEUR;
+    const earlyRSD = mid > 0 ? earlyEUR * mid : 0;
+    const totalRSD = specTotalRSD + debtRSD + lodgingRSD + earlyRSD;
+    const totalEUR = specEUR + debtEUR + lodgingEUR + earlyEUR;
 
     // Naredni period: dan posle kraja specifikacije + 30 kalendarskih dana
     const { startDate: nextPeriodStart, endDate: nextPeriodEnd } =
@@ -207,6 +230,9 @@ const saveBillingForSpecification = async (req: Request, res: Response) => {
       previousDebtRSD: debtRSD,
       nextLodgingEUR: lodgingEUR,
       nextLodgingRSD: lodgingRSD,
+      includeEarlyLodging,
+      earlyLodgingEUR: earlyEUR,
+      earlyLodgingRSD: earlyRSD,
       specEUR,
       totalRSD,
       totalEUR,
@@ -270,6 +296,16 @@ const getSpecificationById = async (req: Request, res: Response) => {
   }
 };
 // ✅ BRISANJE STAVKE IZ SPECIFIKACIJE (vraća stanje na lager i briše zapis o potrošnji)
+// Izmena količine stavke (lek/artikal menja i stanje doma)
+const updateSpecificationItemAmount = async (req: Request, res: Response) => {
+  try {
+    const specification = await setSpecItemAmount(param(req, "specId"), param(req, "itemId"), req.body?.amount, req.user, req.body?.unitPrice);
+    return res.json({ success: true, message: "Količina je izmenjena.", specification });
+  } catch (err) {
+    return res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
+  }
+};
+
 const deleteSpecificationItem = async (req: Request, res: Response) => {
   try {
     const specId = param(req, "specId");
@@ -338,7 +374,7 @@ const getFutureSpecificationPeriods = async (req: Request, res: Response) => {
     }
 
     const until = futureScheduleHorizon(patient.admissionDate);
-    const periods = buildSpecificationSchedule(patient.admissionDate, until, undefined, await Specification.find({ patientId }));
+    const periods = buildSpecificationSchedule(patient.admissionDate, until, undefined, await Specification.find({ patientId, nonStandard: { $ne: true } }));
 
     return res.status(200).json({
       success: true,
@@ -359,4 +395,4 @@ const getFutureSpecificationPeriods = async (req: Request, res: Response) => {
   }
 };
 
-export {getSpecification, getBillingPeriod, getPastPeriods, openPeriod, changeDates, activatePeriod, activateNextPeriod, activateExisting, getFutureSpecificationPeriods, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}
+export {getNonStandardPeriods, openNonStandard, updateSpecificationItemAmount, getSpecification, getBillingPeriod, getPastPeriods, openPeriod, changeDates, activatePeriod, activateNextPeriod, activateExisting, getFutureSpecificationPeriods, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}
