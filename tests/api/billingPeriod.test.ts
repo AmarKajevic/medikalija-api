@@ -224,6 +224,27 @@ describe("zatvorene specifikacije", () => {
   });
 });
 
+describe("ručni izbor perioda", () => {
+  test("prazan period koji se preklapa se uklanja; sa stavkama — poruka i ništa se ne menja", async () => {
+    const { patient, active, billing } = await setup(45);
+    const activate = (startDate: string, endDate: string) => post(`/api/specification/${patient._id}/activate`, { startDate, endDate });
+
+    // Novi period preko praznog aktivnog: aktivan se zamenjuje, bez preklapanja
+    const res = await activate(key(day(-10)), key(day(19)));
+    assert.equal(res.status, 200, res.body.message);
+    assert.equal(await Specification.countDocuments({ _id: active._id }), 0, "prazan preklopljeni period je uklonjen");
+    const now = (await get(`/api/specification/${patient._id}`)).body.specification;
+    assert.equal(key(now.startDate), key(day(-10)));
+
+    // Preko perioda specifikacije koji ima stavke: odbija se
+    await post(`/api/specification/${billing._id}/add-costs`, { extraCostAmount: 100, extraCostLabel: "Prevoz" });
+    const clash = await activate(key(day(-20)), key(day(9)));
+    assert.equal(clash.status, 409);
+    assert.match(clash.body.message, /Preklapa se sa periodom/);
+    assert.equal((await get(`/api/specification/${patient._id}`)).body.specification._id, now._id, "aktivan nije promenjen");
+  });
+});
+
 describe("istorija specifikacija", () => {
   test("lista perioda bez stavki (samo broj stavki i iznosi), najnoviji prvi", async () => {
     const { patient, active, billing } = await setup(45);

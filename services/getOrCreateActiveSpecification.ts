@@ -157,6 +157,17 @@ export async function activateSpecificationPeriod(patientId: Id, startDate: unkn
     throw httpError(400, "Neispravan opseg datuma");
   }
 
+  // Redovni periodi koji se preklapaju sa izabranim: prazni se uklanjaju (novi ih zamenjuje),
+  // a period sa stavkama se ne dira — tada ništa ne menjamo i javljamo koji je
+  const overlapping = dated(await Specification.find({ patientId, ...STANDARD })).filter(
+    (x) => x.start <= end && x.end >= start && !(x.start.getTime() === start.getTime() && x.end.getTime() === end.getTime())
+  );
+  const withItems = overlapping.find((x) => x.spec.items.length > 0);
+  if (withItems) {
+    throw httpError(409, `Preklapa se sa periodom ${fmtDay(withItems.start)} – ${fmtDay(withItems.end)} koji ima stavke. Izmenite njegove datume („Izmeni datume”) ili izaberite druge datume.`);
+  }
+  if (overlapping.length) await Specification.deleteMany({ _id: { $in: overlapping.map((x) => x.spec._id) } });
+
   const spec = await findOrCreateSpecForRange(patientId, start, end);
   return setActiveSpec(patientId, spec);
 }
