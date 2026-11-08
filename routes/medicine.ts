@@ -1,6 +1,6 @@
 import express from "express"
 import type { Request, Response } from "express";
-import { addMedicine, deleteMedicine, getMedicine, getMedicines,
+import { addMedicine, deleteMedicine, setMedicinesForm, getMedicine, getMedicines,
    getPatientMedicine, updateMedicine, useMedicine,
    getPatientStockMedicines,updatePatientMedicine , deletePatientMedicine} from "../controllers/medicineController.js"
 import authMiddleware from "../middleware/authMiddleware.js"
@@ -15,6 +15,8 @@ router.post ("/add",authMiddleware, requireManagerUnlessFamily, addMedicine)
 router.post ("/use",authMiddleware, useMedicine)
 router.get ("/",authMiddleware, getMedicines)
 
+// Razvrstavanje više lekova odjednom (tablete / ampule)
+router.patch("/form", authMiddleware, requireManager, setMedicinesForm);
 router.put("/:medicineId", authMiddleware, requireManager, updateMedicine);
 router.delete ("/:medicineId",authMiddleware, requireManager, deleteMedicine)
 
