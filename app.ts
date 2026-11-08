@@ -23,6 +23,7 @@ import dashboardRouter from "./routes/dashboard.js"
 import settingsRouter from "./routes/settings.js"
 import nurseEntriesRouter from "./routes/nurseEntries.js"
 import careTasksRouter from "./routes/careTasks.js"
+import lodgingPricesRouter from "./routes/lodgingPrices.js";
 import medicalReportsRouter from "./routes/medicalReports.js"
 import socialNotesRouter from "./routes/socialNotes.js"
 
@@ -82,6 +83,7 @@ app.use("/api/dashboard", dashboardRouter);
 app.use("/api/settings", settingsRouter);
 app.use("/api/nurse-entries", nurseEntriesRouter);
 app.use("/api/care-tasks", careTasksRouter);
+app.use("/api/lodging-prices", lodgingPricesRouter);
 app.use("/api/medical-reports", medicalReportsRouter);
 app.use("/api/social-notes", socialNotesRouter);
 

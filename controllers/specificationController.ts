@@ -186,6 +186,9 @@ const addCostsToSpecification = async (req: Request, res: Response) => {
 // controllers/specificationController.js (nastavak)
 
 
+// Naziv izabrane cene smeštaja (npr. "30 dana") za prikaz i štampu
+const optionLabel = (v: unknown) => (typeof v === "string" ? v.trim().slice(0, 80) : "");
+
 const saveBillingForSpecification = async (req: Request, res: Response) => {
   try {
     const id = param(req, "id");
@@ -230,9 +233,11 @@ const saveBillingForSpecification = async (req: Request, res: Response) => {
       previousDebtRSD: debtRSD,
       nextLodgingEUR: lodgingEUR,
       nextLodgingRSD: lodgingRSD,
+      nextLodgingOption: includeLodging ? optionLabel(req.body.nextLodgingOption) : "",
       includeEarlyLodging,
       earlyLodgingEUR: earlyEUR,
       earlyLodgingRSD: earlyRSD,
+      earlyLodgingOption: includeEarlyLodging ? optionLabel(req.body.earlyLodgingOption) : "",
       specEUR,
       totalRSD,
       totalEUR,
