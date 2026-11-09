@@ -6,6 +6,8 @@ declare global {
     interface Request {
       // Postavlja authMiddleware. Na rutama bez authMiddleware ne sme se koristiti.
       user: HydratedDocument<UserAttrs>;
+      /** Sesija (uređaj) iz access tokena — postavlja authMiddleware */
+      sessionId: string;
     }
   }
 }

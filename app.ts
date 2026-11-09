@@ -1,8 +1,12 @@
 import express from "express"
 import cors from 'cors'
 import cookieParser from "cookie-parser"
+import helmet from "helmet"
 import type { NextFunction, Request, Response } from "express"
 import connectToDatabase from "./db/db.js"
+import { allowedOrigins } from "./utils/cors.js"
+import { GENERIC_ERROR } from "./utils/errors.js"
+import { reportError } from "./utils/logger.js"
 import authRouther from "./routes/auth.js"
 import patientRouter from "./routes/patient.js"
 import diagnosisRouter from "./routes/diganosis.js"
@@ -32,6 +36,10 @@ import socialNotesRouter from "./routes/socialNotes.js"
 // Express aplikacija bez pokretanja servera — koriste je index.ts i testovi.
 const app = express();
 app.disable("x-powered-by");
+// Vercel je ispred aplikacije: prava IP adresa klijenta (ograničenje zahteva, sesije) je iz X-Forwarded-For
+app.set("trust proxy", 1);
+// Bezbednosna zaglavlja (HSTS, nosniff, frameguard...); API vraća samo JSON
+app.use(helmet());
 
 // Podešavanja ustanove nose logo (data URL), pa im treba veće ograničenje tela.
 // Parser za tu rutu ide prvi; opšti parser posle toga preskače već pročitano telo.
@@ -39,14 +47,9 @@ app.use("/api/settings", express.json({ limit: "1mb" }));
 app.use(express.json());
 app.use(cookieParser());
 
-const allowedOrigins = (process.env.CORS_ORIGIN || "https://medikalija-frontend.vercel.app")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-
 app.use(
   cors({
-    origin: allowedOrigins,
+    origin: allowedOrigins(),
     credentials: true,
   })
 );
@@ -90,5 +93,21 @@ app.use("/api/lodging-prices", lodgingPricesRouter);
 app.use("/api/physio-prices", physioPricesRouter);
 app.use("/api/medical-reports", medicalReportsRouter);
 app.use("/api/social-notes", socialNotesRouter);
+
+// Nepoznata ruta: JSON umesto Express HTML stranice
+app.use("/api", (_req: Request, res: Response) => {
+  res.status(404).json({ success: false, message: "Ne postoji." });
+});
+
+// Greška koju ruta nije sama obradila (npr. neispravan JSON u telu): bez internih detalja ka klijentu
+app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+  const status = (err as { status?: unknown; statusCode?: unknown }).status ?? (err as { statusCode?: unknown }).statusCode;
+  if (typeof status === "number" && status >= 400 && status < 500) {
+    return res.status(status).json({ success: false, message: status === 413 ? "Zahtev je prevelik." : "Neispravan zahtev." });
+  }
+  reportError(err, { method: req.method, path: req.originalUrl });
+  if (res.headersSent) return;
+  res.status(500).json({ success: false, message: GENERIC_ERROR });
+});
 
 export default app;

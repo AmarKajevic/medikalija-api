@@ -1,15 +1,22 @@
-import jwt from "jsonwebtoken";
-import crypto from "crypto";
 import bcrypt from "bcrypt";
 import type { CookieOptions, Request, Response } from "express";
 import type { HydratedDocument } from "mongoose";
 import User, { canSignIn, isActiveRole, type UserAttrs } from "../models/User.js";
-import Token from "../models/Token.js";
 import { escapeRegex } from "../utils/escapeRegex.js";
-import { requireEnv } from "../utils/env.js";
 import { errorMessage, httpError, statusOf } from "../utils/errors.js";
 import { isMailEnabled, linkEmail, sendMail } from "../utils/mailer.js";
-import { findByLink, hashToken, issueLink } from "../services/auth/links.js";
+import { findByLink, issueLink } from "../services/auth/links.js";
+import {
+  createSession,
+  listSessions,
+  revokeByRefreshToken,
+  revokeSession,
+  revokeSessions,
+  rotateSession,
+  signAccessToken,
+  SESSION_IDLE_MS,
+} from "../services/auth/sessions.js";
+import { log, securityEvent } from "../utils/logger.js";
 import { assertStrongPassword } from "../services/auth/password.js";
 import { googleClientId, verifyGoogleCredential } from "../services/auth/google.js";
 import GlobalSetting from "../models/GlobalSetting.js";
@@ -19,44 +26,40 @@ type UserDoc = HydratedDocument<UserAttrs>;
 const fail = (res: Response, err: unknown) => res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
 
 // ------------------ SESIJE ------------------
-const ACCESS_TTL = "4h";
-const REFRESH_TOKEN_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
+// Refresh token je u httpOnly kolačiću ograničenom na /api/auth (ne šalje se uz ostale zahteve).
+// U produkciji: Secure + prefiks __Secure- (browser ga ne prima preko http-a niti od poddomena).
+const secureCookies = () => process.env.NODE_ENV === "production";
+export const refreshCookieName = () => (secureCookies() ? "__Secure-rt" : "rt");
+/** Kolačić iz ranije verzije (putanja "/", JWT refresh token) — samo se briše */
+const LEGACY_COOKIE = "refreshToken";
 
-const generateAccessToken = (user: { _id: unknown; role: string }) =>
-  jwt.sign({ _id: user._id, role: user.role }, requireEnv("JWT_KEY"), { expiresIn: ACCESS_TTL });
-
-const refreshCookieOptions = (): CookieOptions => ({
+const cookieBase = (): CookieOptions => ({
   httpOnly: true,
-  secure: process.env.NODE_ENV === "production",
-  sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
-  maxAge: REFRESH_TOKEN_MAX_AGE,
+  secure: secureCookies(),
+  // Frontend i API mogu biti na različitim sajtovima (*.vercel.app); preko /api rewrite-a su isti sajt
+  sameSite: secureCookies() ? "none" : "lax",
+  path: "/api/auth",
 });
 
-// U bazi je samo heš refresh tokena — curenje baze ne daje preuzimanje sesija
-async function issueRefreshToken(user: { _id: unknown; role: string }) {
-  // jti garantuje jedinstven token i kad se rotira više puta u istoj sekundi
-  const refreshToken = jwt.sign({ _id: user._id, role: user.role, jti: crypto.randomUUID() }, requireEnv("JWT_REFRESH_SECRET"), { expiresIn: "7d" });
-  await Token.create({ user: user._id, token: hashToken(refreshToken), expiresAt: new Date(Date.now() + REFRESH_TOKEN_MAX_AGE) });
-  return refreshToken;
-}
+const setRefreshCookie = (res: Response, token: string) => res.cookie(refreshCookieName(), token, { ...cookieBase(), maxAge: SESSION_IDLE_MS });
+const clearRefreshCookie = (res: Response) => res.clearCookie(refreshCookieName(), cookieBase());
+const clearLegacyCookie = (req: Request, res: Response) => {
+  if (req.cookies?.[LEGACY_COOKIE]) res.clearCookie(LEGACY_COOKIE, { ...cookieBase(), path: "/" });
+};
+const readRefreshCookie = (req: Request): unknown => req.cookies?.[refreshCookieName()];
 
-/** Zapis sesije: novi (heš) ili stari zapis iz vremena pre heširanja */
-const findSession = (refreshToken: string) => Token.findOne({ token: { $in: [hashToken(refreshToken), refreshToken] } });
-
-/** Gasi sve sesije korisnika (suspendovanje, nova lozinka), osim eventualno trenutne */
-export async function revokeSessions(userId: unknown, keepRefreshToken?: string) {
-  const keep = keepRefreshToken ? [hashToken(keepRefreshToken), keepRefreshToken] : [];
-  await Token.deleteMany({ user: userId, token: { $nin: keep } });
-}
+export { revokeSessions };
 
 const publicUser = (u: UserDoc) => ({ _id: u._id, name: u.name, lastName: u.lastName, role: u.role, email: u.email ?? null, username: u.username ?? null });
 
-async function startSession(res: Response, user: UserDoc, method: "password" | "google") {
+async function startSession(req: Request, res: Response, user: UserDoc, method: "password" | "google") {
   user.set({ failedLogins: 0, lockedUntil: null, lastLoginAt: new Date(), lastLoginMethod: method });
   await user.save();
-  const refreshToken = await issueRefreshToken(user);
-  res.cookie("refreshToken", refreshToken, refreshCookieOptions());
-  return res.status(200).json({ success: true, accessToken: generateAccessToken(user), user: publicUser(user) });
+  const { session, refreshToken } = await createSession(user._id, method, req);
+  clearLegacyCookie(req, res);
+  setRefreshCookie(res, refreshToken);
+  log.info("login", { userId: String(user._id), sessionId: String(session._id), method, ip: req.ip });
+  return res.status(200).json({ success: true, accessToken: signAccessToken(user._id, session._id), user: publicUser(user) });
 }
 
 /** Razlog zašto aktivan zapis ipak ne sme da se prijavi (ista poruka za sve ostalo) */
@@ -72,7 +75,9 @@ const MAX_FAILED = 5;
 const LOCK_MINUTES = 15;
 const INVALID = "Pogrešni podaci za prijavu.";
 // Lažno poređenje kad korisnik ne postoji — odgovor traje isto (ne otkriva ko postoji)
-const DUMMY_HASH = bcrypt.hashSync("nema-korisnika-dummy", 10);
+const DUMMY_HASH = bcrypt.hashSync("nema-korisnika-dummy", 12);
+/** Cena bcrypt heša za nove lozinke (stare sa 10 ostaju važeće) */
+export const BCRYPT_COST = 12;
 
 async function findForLogin(body: Record<string, unknown>): Promise<UserDoc | null> {
   const identifier = typeof body.identifier === "string" ? body.identifier.trim().toLowerCase() : "";
@@ -112,11 +117,12 @@ const login = async (req: Request, res: Response) => {
         { _id: user._id },
         failed >= MAX_FAILED ? { $set: { failedLogins: 0, lockedUntil: new Date(Date.now() + LOCK_MINUTES * 60_000) } } : { $set: { failedLogins: failed } }
       );
+      if (failed >= MAX_FAILED) securityEvent("account_locked", { userId: String(user._id), ip: req.ip });
       throw httpError(401, failed >= MAX_FAILED ? `Previše neuspešnih pokušaja. Nalog je zaključan ${LOCK_MINUTES} minuta.` : INVALID);
     }
     const problem = accessProblem(user);
     if (problem) throw httpError(403, problem);
-    return startSession(res, user, "password");
+    return startSession(req, res, user, "password");
   } catch (err) {
     fail(res, err);
   }
@@ -147,7 +153,7 @@ const googleLogin = async (req: Request, res: Response) => {
 
     const problem = accessProblem(user);
     if (problem) throw httpError(403, problem);
-    return startSession(res, user, "google");
+    return startSession(req, res, user, "google");
   } catch (err) {
     if ((err as { code?: number }).code === 11000) return res.status(409).json({ success: false, message: "Ova Google adresa je već povezana sa drugim korisnikom." });
     fail(res, err);
@@ -155,57 +161,75 @@ const googleLogin = async (req: Request, res: Response) => {
 };
 
 // ------------------ OSVEŽAVANJE I ODJAVA ------------------
+// POST /api/auth/refresh — nov access token i rotiran refresh token (ista sesija)
 const refresh = async (req: Request, res: Response) => {
   try {
-    const refreshToken = req.cookies?.refreshToken;
-    if (!refreshToken) return res.status(400).json({ success: false, message: "Nedostaje refresh token" });
+    clearLegacyCookie(req, res);
+    const raw = readRefreshCookie(req);
+    if (!raw) return res.status(401).json({ success: false, code: "no_session", message: "Niste prijavljeni." });
 
-    const stored = await findSession(refreshToken);
-    if (!stored) {
-      // Već rotiran ili falsifikovan — briše se kolačić da se ne pokušava ponovo
-      res.clearCookie("refreshToken", refreshCookieOptions());
-      return res.status(403).json({ success: false, message: "Refresh token nije validan" });
+    const result = await rotateSession(raw, req);
+    if (!result.ok) {
+      clearRefreshCookie(res);
+      const message = result.reason === "expired" ? "Sesija je istekla. Prijavite se ponovo." : "Sesija nije važeća. Prijavite se ponovo.";
+      return res.status(401).json({ success: false, code: `session_${result.reason}`, message });
     }
 
-    let subjectId: string;
-    try {
-      const decoded = jwt.verify(refreshToken, requireEnv("JWT_REFRESH_SECRET"));
-      if (typeof decoded === "string" || typeof decoded._id !== "string") throw new Error("payload");
-      subjectId = decoded._id;
-    } catch {
-      await Token.deleteOne({ _id: stored._id });
-      res.clearCookie("refreshToken", refreshCookieOptions());
-      return res.status(403).json({ success: false, message: "Neispravan ili istekao refresh token" });
-    }
-
-    const user = await User.findById(subjectId);
+    const user = await User.findById(result.session.user);
     // Suspendovan ili obrisan korisnik ne dobija novu sesiju
     if (!user || !canSignIn(user)) {
-      await revokeSessions(subjectId);
-      res.clearCookie("refreshToken", refreshCookieOptions());
-      return res.status(403).json({ success: false, message: "Pristup je ukinut." });
+      await revokeSessions(result.session.user);
+      clearRefreshCookie(res);
+      return res.status(401).json({ success: false, code: "access_revoked", message: "Pristup je ukinut." });
     }
 
-    // Rotacija: stari token se briše, izdaje se novi
-    await Token.deleteOne({ _id: stored._id });
-    const newRefreshToken = await issueRefreshToken(user);
-    res.cookie("refreshToken", newRefreshToken, refreshCookieOptions());
-    return res.status(200).json({ success: true, accessToken: generateAccessToken(user), user });
-  } catch {
-    return res.status(403).json({ success: false, message: "Neispravan ili istekao refresh token" });
+    setRefreshCookie(res, result.refreshToken);
+    return res.status(200).json({ success: true, accessToken: signAccessToken(user._id, result.session._id), user: publicUser(user) });
+  } catch (err) {
+    fail(res, err);
   }
 };
 
+// POST /api/auth/logout — gasi ovu sesiju (i njen access token, odmah)
 const logout = async (req: Request, res: Response) => {
   try {
-    const refreshToken = req.cookies?.refreshToken;
-    if (refreshToken) {
-      await Token.deleteOne({ token: { $in: [hashToken(refreshToken), refreshToken] } });
-      res.clearCookie("refreshToken", refreshCookieOptions());
-    }
-    return res.status(200).json({ success: true, message: "Logged out" });
+    await revokeByRefreshToken(readRefreshCookie(req));
+    clearRefreshCookie(res);
+    clearLegacyCookie(req, res);
+    return res.status(200).json({ success: true, message: "Odjavljeni ste." });
   } catch (err) {
-    return res.status(500).json({ success: false, error: errorMessage(err) });
+    fail(res, err);
+  }
+};
+
+// ------------------ AKTIVNI UREĐAJI ------------------
+// GET /api/auth/sessions — moje sesije (uređaji), trenutna označena
+const mySessions = async (req: Request, res: Response) => {
+  try {
+    const sessions = await listSessions(req.user._id);
+    res.json({ success: true, sessions: sessions.map((s) => ({ ...s, current: s.id === req.sessionId })) });
+  } catch (err) {
+    fail(res, err);
+  }
+};
+
+// DELETE /api/auth/sessions/:id — odjava jednog uređaja
+const endSession = async (req: Request, res: Response) => {
+  try {
+    if (!(await revokeSession(req.user._id, String(req.params.id)))) throw httpError(404, "Sesija ne postoji.");
+    res.json({ success: true, message: "Uređaj je odjavljen." });
+  } catch (err) {
+    fail(res, err);
+  }
+};
+
+// POST /api/auth/sessions/revoke-others — odjava sa svih ostalih uređaja
+const endOtherSessions = async (req: Request, res: Response) => {
+  try {
+    const count = await revokeSessions(req.user._id, req.sessionId);
+    res.json({ success: true, message: count ? `Odjavljeno uređaja: ${count}.` : "Nema drugih prijavljenih uređaja.", count });
+  } catch (err) {
+    fail(res, err);
   }
 };
 
@@ -243,7 +267,7 @@ const acceptLink = async (req: Request, res: Response) => {
     assertStrongPassword(req.body?.password, user);
     const purpose = user.link!.purpose;
     user.set({
-      passwordHash: await bcrypt.hash(req.body.password, 10),
+      passwordHash: await bcrypt.hash(req.body.password, BCRYPT_COST),
       passwordChangedAt: new Date(),
       status: user.status === "suspended" ? "suspended" : "active",
       link: { tokenHash: null, purpose: null, expiresAt: null },
@@ -257,7 +281,7 @@ const acceptLink = async (req: Request, res: Response) => {
       await user.save();
       throw httpError(403, problem);
     }
-    return startSession(res, user, "password");
+    return startSession(req, res, user, "password");
   } catch (err) {
     fail(res, err);
   }
@@ -308,9 +332,9 @@ const changePassword = async (req: Request, res: Response) => {
       }
     }
     assertStrongPassword(req.body?.newPassword, user);
-    user.set({ passwordHash: await bcrypt.hash(req.body.newPassword, 10), passwordChangedAt: new Date() });
+    user.set({ passwordHash: await bcrypt.hash(req.body.newPassword, BCRYPT_COST), passwordChangedAt: new Date() });
     await user.save();
-    await revokeSessions(user._id, req.cookies?.refreshToken);
+    await revokeSessions(user._id, req.sessionId);
     res.json({ success: true, message: "Lozinka je promenjena. Odjavljeni ste sa ostalih uređaja." });
   } catch (err) {
     fail(res, err);
@@ -322,4 +346,4 @@ const getCurrentUser = (req: Request, res: Response) => res.status(200).json({ s
 // GET /api/auth/config — šta je uključeno (za ekran prijave)
 const authConfig = (_req: Request, res: Response) => res.json({ success: true, googleClientId: googleClientId(), emailEnabled: isMailEnabled() });
 
-export { login, googleLogin, refresh, logout, getLink, acceptLink, forgotPassword, changePassword, getCurrentUser, authConfig };
+export { login, googleLogin, refresh, logout, mySessions, endSession, endOtherSessions, getLink, acceptLink, forgotPassword, changePassword, getCurrentUser, authConfig };

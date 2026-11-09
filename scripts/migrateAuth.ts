@@ -11,15 +11,14 @@
 //  1. svodi e-mail adrese na mala slova; prijavljuje duplikate (oni se moraju ručno rešiti)
 //  2. postavlja status (active) starim zapisima koji ga nemaju
 //  3. zamenjuje stari jedinstveni indeks na e-mailu indeksom koji dozvoljava osoblje bez mejla
-//  4. hešira postojeće refresh tokene (korisnici ostaju prijavljeni)
+//  4. briše stare refresh tokene (kolekcija "tokens"); sesije su sada u "sessions",
+//     pa se svi korisnici jednom ponovo prijavljuju
 //  5. ispisuje korisnike sa pristupom koji nemaju ni e-mail ni korisničko ime
 //     (prijavljuju se starim načinom dok im admin ne doda jedno od toga)
 
 import mongoose from "mongoose";
 import connectToDatabase from "../db/db.js";
 import User, { isActiveRole } from "../models/User.js";
-import Token from "../models/Token.js";
-import { hashToken } from "../services/auth/links.js";
 
 const APPLY = process.argv.includes("--apply");
 
@@ -64,10 +63,11 @@ async function main() {
     await User.syncIndexes();
   }
 
-  // 4. refresh tokeni (stari zapisi su ceo JWT; novi su SHA-256 heš)
-  const plain = await Token.find({ token: /\./ }, { token: 1 }).lean();
-  console.log(`Refresh tokeni za heširanje: ${plain.length}`);
-  if (APPLY) for (const t of plain) await Token.updateOne({ _id: t._id }, { $set: { token: hashToken(t.token) } });
+  // 4. stari refresh tokeni (pre sesija) više ne važe
+  const db = mongoose.connection.db!;
+  const hasOld = (await db.listCollections({ name: "tokens" }).toArray()).length > 0;
+  console.log(`Stara kolekcija tokena: ${hasOld ? "postoji (briše se)" : "nema"}`);
+  if (APPLY && hasOld) await db.dropCollection("tokens");
 
   // 5. ko nema novi način prijave
   const noLogin = all.filter((u) => isActiveRole(u.role) && u.loginAllowed !== false && !u.email && !u.username);

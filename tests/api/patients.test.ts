@@ -4,6 +4,7 @@ import request from "supertest";
 import app from "../../app.js";
 import Patient from "../../models/Patient.js";
 import Specification from "../../models/Specification.js";
+import Diagnosis from "../../models/Diagnosis.js";
 import { authHeader, createPatient, createUser, DAY_MS, must, useTestDatabase, type UserDoc } from "../helpers/setup.js";
 
 useTestDatabase();
@@ -151,5 +152,30 @@ describe("lista pacijenata", () => {
     await createPatient({ name: "Treći" });
     const res = await request(app).get("/api/patient").set(authHeader(nurse));
     assert.deepEqual(res.body.patients.map((p: { name: string }) => p.name), ["Treći", "Drugi", "Prvi"]);
+  });
+});
+
+describe("DELETE /api/patient/:id", () => {
+  const remove = (id: unknown, user: UserDoc = admin) => request(app).delete(`/api/patient/${id}`).set(authHeader(user));
+
+  test("pacijent bez dokumentacije se briše (sa praznim periodima)", async () => {
+    const patient = await createPatient();
+    await request(app).get(`/api/specification/${patient._id}`).set(authHeader(admin)); // pravi prazan period
+    assert.equal((await remove(patient._id, nurse)).status, 403);
+    const res = await remove(patient._id);
+    assert.equal(res.status, 200);
+    assert.equal(await Patient.countDocuments({ _id: patient._id }), 0);
+    assert.equal(await Specification.countDocuments({ patientId: patient._id }), 0);
+  });
+
+  test("pacijent sa dokumentacijom se ne briše (otpušta se); nepostojeći → 404 (ranije: zahtev bez odgovora)", async () => {
+    const patient = await createPatient();
+    await Diagnosis.create({ patient: patient._id, description: "Pritisak 130/80", createdBy: nurse._id });
+    const res = await remove(patient._id);
+    assert.equal(res.status, 409);
+    assert.match(res.body.message, /Otpustite/);
+    assert.equal(await Patient.countDocuments({ _id: patient._id }), 1);
+    assert.equal((await remove("000000000000000000000000")).status, 404);
+    assert.equal((await remove("nije-id")).status, 400);
   });
 });

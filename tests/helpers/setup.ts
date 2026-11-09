@@ -2,12 +2,12 @@
 import { after, before, beforeEach } from "node:test";
 import mongoose, { type HydratedDocument } from "mongoose";
 import { MongoMemoryServer } from "mongodb-memory-server";
-import jwt from "jsonwebtoken";
 import User, { type Role, type UserAttrs } from "../../models/User.js";
 import Patient from "../../models/Patient.js";
+import Session from "../../models/Session.js";
+import { signAccessToken, SESSION_ABSOLUTE_MS, SESSION_IDLE_MS } from "../../services/auth/sessions.js";
 
 process.env.JWT_KEY ??= "test-jwt-key";
-process.env.JWT_REFRESH_SECRET ??= "test-refresh-key";
 process.env.NODE_ENV ??= "test";
 
 export type UserDoc = HydratedDocument<UserAttrs>;
@@ -40,9 +40,12 @@ export function useTestDatabase() {
 
 let counter = 0;
 
+// Svaki test korisnik dobija pravu sesiju (kao posle prijave), pa authHeader radi kao u aplikaciji
+const sessionOf = new Map<string, string>();
+
 export async function createUser(role: Role, overrides: Partial<UserAttrs> = {}): Promise<UserDoc> {
   counter += 1;
-  return User.create({
+  const user = await User.create({
     name: `Test${counter}`,
     lastName: role,
     email: `user${counter}@test.local`,
@@ -50,10 +53,19 @@ export async function createUser(role: Role, overrides: Partial<UserAttrs> = {})
     role,
     ...overrides,
   });
+  const now = Date.now();
+  const session = await Session.create({
+    user: user._id,
+    tokenHash: `test-${counter}`,
+    method: "password",
+    expiresAt: new Date(now + SESSION_IDLE_MS),
+    absoluteExpiresAt: new Date(now + SESSION_ABSOLUTE_MS),
+  });
+  sessionOf.set(String(user._id), String(session._id));
+  return user;
 }
 
-export const tokenFor = (user: UserDoc) =>
-  jwt.sign({ _id: String(user._id), role: user.role }, must(process.env.JWT_KEY), { expiresIn: "1h" });
+export const tokenFor = (user: UserDoc) => signAccessToken(user._id, must(sessionOf.get(String(user._id)), "sesija test korisnika"));
 
 export const authHeader = (user: UserDoc) => ({ Authorization: `Bearer ${tokenFor(user)}` });
 

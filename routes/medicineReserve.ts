@@ -10,8 +10,8 @@ import {
 
 const router = express.Router();
 
-router.post("/move", authMiddleware, moveToReserve);
-router.get("/", authMiddleware, getReserve);
+router.post("/move", authMiddleware, requireManager, moveToReserve);
+router.get("/", authMiddleware, requireManager, getReserve);
 router.delete("/:id", authMiddleware, requireManager, deleteReserveItem);
 router.post("/return", authMiddleware, requireManager, returnFromReserve);
 

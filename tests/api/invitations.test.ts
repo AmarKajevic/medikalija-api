@@ -5,7 +5,7 @@ import request from "supertest";
 import bcrypt from "bcrypt";
 import app from "../../app.js";
 import User from "../../models/User.js";
-import Token from "../../models/Token.js";
+import Session from "../../models/Session.js";
 import { setGoogleVerifier } from "../../services/auth/google.js";
 import { ensureUserIndexes } from "../../services/auth/indexes.js";
 import nodemailer from "nodemailer";
@@ -166,7 +166,7 @@ describe("nova lozinka", () => {
     assert.match(link.body.link.url, /\/reset-password\//);
     const res = await request(app).post(`/api/auth/link/${tokenOf(link.body.link.url)}`).send({ password: "posle-zaborava-77" });
     assert.equal(res.status, 200);
-    assert.equal((await request(app).post("/api/auth/refresh").set("Cookie", oldCookie)).status, 403);
+    assert.equal((await request(app).post("/api/auth/refresh").set("Cookie", oldCookie)).status, 401);
   });
 
   test("zaboravljena lozinka bez mejl servisa: uputstvo, isti odgovor za sve", async () => {
@@ -182,12 +182,12 @@ describe("suspendovanje i brisanje", () => {
   test("suspendovanje gasi sesije; ne može sebe ni poslednjeg admina", async () => {
     const nurse = await createUser("nurse", { username: "mira", passwordHash: await bcrypt.hash("lozinka-mira-1", 4) });
     await request(app).post("/api/auth/login").send({ identifier: "mira", password: "lozinka-mira-1" });
-    assert.equal(await Token.countDocuments({ user: nurse._id }), 1);
+    assert.equal(await Session.countDocuments({ user: nurse._id }), 2, "test sesija + prijava");
 
     const res = await request(app).patch(`/api/auth/users/${nurse._id}`).set(authHeader(admin)).send({ status: "suspended" });
     assert.equal(res.status, 200);
     assert.equal(res.body.user.status, "suspended");
-    assert.equal(await Token.countDocuments({ user: nurse._id }), 0);
+    assert.equal(await Session.countDocuments({ user: nurse._id }), 0);
 
     assert.equal((await request(app).patch(`/api/auth/users/${admin._id}`).set(authHeader(admin)).send({ status: "suspended" })).status, 400);
     const admin2 = await createUser("admin");
