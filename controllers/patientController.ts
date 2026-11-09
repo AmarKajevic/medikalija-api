@@ -2,7 +2,17 @@ import Patient from "../models/Patient.js"
 import Specification from "../models/Specification.js";
 import { normalizeStoredDay, parseCalendarDay, sameDayQuery } from "../utils/dateUtils.js";
 import type { Request, Response } from "express";
-import { errorMessage } from "../utils/errors.js";
+import { errorMessage, statusOf } from "../utils/errors.js";
+import NurseEntry from "../models/NurseEntry.js";
+import Diagnosis from "../models/Diagnosis.js";
+import UsedMedicine from "../models/UsedMedicine.js";
+import UsedArticles from "../models/UsedArticles.js";
+import UsedCombinations from "../models/UsedCombinations.js";
+import MedicalReport from "../models/MedicalReport.js";
+import SocialNote from "../models/SocialNote.js";
+import CalendarEvent from "../models/CalendarEvent.js";
+import PatientMedicine from "../models/PatientMedicine.js";
+import PatientArticle from "../models/PatientArticle.js";
 import { param } from "../utils/http.js";
 
 const getPatients = async (_req: Request, res: Response) => {
@@ -95,22 +105,47 @@ const updatePatient = async (req: Request, res: Response) => {
   }
 };
 
+// Brisanje je dozvoljeno samo za pacijenta bez ikakve dokumentacije (npr. greškom unet).
+// Pacijent sa zapisima (specifikacije, unosi, izveštaji, beleške, zalihe) se otpušta — medicinska
+// i finansijska dokumentacija se čuva i ne sme ostati bez pacijenta.
 const deletePatient = async (req: Request, res: Response) => {
-    try {
-        if (req.user.role !== "admin" && req.user.role !== "main-nurse") {
-  return res.status(403).json({ success: false, message: "Nemate dozvolu da obrišete pacijenta" });
-        }
-
+  try {
+    if (req.user.role !== "admin" && req.user.role !== "main-nurse") {
+      return res.status(403).json({ success: false, message: "Nemate dozvolu da obrišete pacijenta" });
+    }
     const id = param(req, "id");
-    const deletePatient = await Patient.findByIdAndDelete({_id: id})
-    if(deletePatient) {
-        return res.status(200).json({success:true, message:"pacijent je uspesno izbrisan"})
+    const patient = await Patient.findById(id);
+    if (!patient) return res.status(404).json({ success: false, message: "Pacijent nije pronađen." });
+
+    const byPatient = { patient: patient._id };
+    const counts = await Promise.all([
+      Specification.countDocuments({ patientId: patient._id, "items.0": { $exists: true } }),
+      NurseEntry.countDocuments(byPatient),
+      Diagnosis.countDocuments(byPatient),
+      UsedMedicine.countDocuments(byPatient),
+      UsedArticles.countDocuments(byPatient),
+      UsedCombinations.countDocuments(byPatient),
+      MedicalReport.countDocuments(byPatient),
+      SocialNote.countDocuments(byPatient),
+      CalendarEvent.countDocuments(byPatient),
+      PatientMedicine.countDocuments(byPatient),
+      PatientArticle.countDocuments(byPatient),
+    ]);
+    if (counts.some((n) => n > 0)) {
+      return res.status(409).json({
+        success: false,
+        message: "Pacijent ima dokumentaciju (specifikacije, unose, izveštaje ili zalihe) i ne može se obrisati. Otpustite ga — podaci ostaju sačuvani.",
+      });
     }
-    
-    }catch(error){
-        res.status(500).json({success: false, error: errorMessage(error)});
-    }
-}
+
+    // Prazni periodi (bez stavki) nastaju sami i brišu se sa pacijentom
+    await Specification.deleteMany({ patientId: patient._id });
+    await Patient.deleteOne({ _id: patient._id });
+    return res.status(200).json({ success: true, message: "Pacijent je obrisan." });
+  } catch (error) {
+    return res.status(statusOf(error)).json({ success: false, message: errorMessage(error) });
+  }
+};
 const dischargePatient = async (req: Request, res: Response) => {
   try {
     const id = param(req, "id");

@@ -119,6 +119,36 @@ describe("rezerva lekova", () => {
     assert.equal(must(await PatientMedicine.findOne({ patient: patient._id })).quantity, 4);
   });
 
+  test("premeštanje u rezervu: samo uprava, ispravna količina, sabira se u istu stavku", async () => {
+    const med = await Medicine.create({ name: "Andol", quantity: 10, unitsPerPackage: 5 });
+    const move = (user: UserDoc, amount: unknown) =>
+      request(app).post("/api/medicine-reserve/move").set(authHeader(user)).send({ medicineId: String(med._id), amount, source: "home" });
+
+    assert.equal((await move(nurse, 1)).status, 403, "sestra ne premešta");
+    for (const bad of ["abc", -1, 0, "Infinity", null]) assert.equal((await move(admin, bad)).status, 400, String(bad));
+    assert.equal(must(await Medicine.findById(med._id)).quantity, 10, "neispravan zahtev ne menja stanje (ranije: NaN)");
+
+    assert.equal((await move(admin, 4)).status, 200);
+    assert.equal((await move(admin, "2")).status, 200);
+    assert.equal((await move(admin, 5)).status, 400, "ima još samo 4");
+    const saved = must(await Medicine.findById(med._id));
+    assert.equal(saved.quantity, 4);
+    assert.equal(saved.packageCount, 0);
+    const reserve = await MedicineReserve.find({ medicine: med._id });
+    assert.equal(reserve.length, 1);
+    assert.equal(reserve[0]!.amount, 6);
+  });
+
+  test("istovremena premeštanja ne skidaju više nego što ima", async () => {
+    const med = await Medicine.create({ name: "Andol", quantity: 5 });
+    const results = await Promise.all(
+      [1, 2, 3].map(() => request(app).post("/api/medicine-reserve/move").set(authHeader(admin)).send({ medicineId: String(med._id), amount: 2, source: "home" }))
+    );
+    assert.equal(results.filter((r) => r.status === 200).length, 2);
+    assert.equal(must(await Medicine.findById(med._id)).quantity, 1);
+    assert.equal(must(await MedicineReserve.findOne({ medicine: med._id })).amount, 4);
+  });
+
   test("sestra ne može da vraća ni otpisuje iz rezerve", async () => {
     const med = await Medicine.create({ name: "Andol", quantity: 5 });
     const item = await MedicineReserve.create({ medicine: med._id, name: "Andol", amount: 10, source: "home" });

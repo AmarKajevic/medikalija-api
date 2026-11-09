@@ -4,8 +4,10 @@ import request from "supertest";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import app from "../../app.js";
-import Token from "../../models/Token.js";
+import Session from "../../models/Session.js";
+import { REUSE_GRACE_MS, SESSION_ABSOLUTE_MS } from "../../services/auth/sessions.js";
 import User from "../../models/User.js";
+import { allowedOrigins } from "../../utils/cors.js";
 import { authHeader, createUser, must, useTestDatabase, type UserDoc } from "../helpers/setup.js";
 
 useTestDatabase();
@@ -18,7 +20,13 @@ beforeEach(async () => {
 });
 
 const login = (body: Record<string, string>) => request(app).post("/api/auth/login").send(body);
-const cookieOf = (res: request.Response) => String(res.headers["set-cookie"]).split(";")[0]!;
+// Refresh kolačić iz odgovora ("rt=..."); ostali (npr. brisanje starog) se preskaču
+const cookieOf = (res: request.Response) => {
+  const all = ([] as string[]).concat(res.headers["set-cookie"] ?? []);
+  return must(all.find((c) => c.startsWith("rt=")), "refresh kolačić").split(";")[0]!;
+};
+const refresh = (cookie: string) => request(app).post("/api/auth/refresh").set("Cookie", cookie);
+const signIn = () => login({ identifier: "sanja.s", password: PASSWORD });
 
 describe("POST /api/auth/login", () => {
   test("e-mail (bez obzira na velika slova) ili korisničko ime: token + httpOnly kolačić", async () => {
@@ -28,19 +36,26 @@ describe("POST /api/auth/login", () => {
       assert.equal(res.body.user.role, "nurse");
       assert.equal(res.body.user.passwordHash, undefined, "heš lozinke ne sme da izađe iz API-ja");
       assert.ok(jwt.decode(res.body.accessToken));
-      assert.match(String(res.headers["set-cookie"]), /HttpOnly/i);
+      const setCookie = String(res.headers["set-cookie"]);
+      assert.match(setCookie, /HttpOnly/i);
+      assert.match(setCookie, /Path=\/api\/auth/, "kolačić se šalje samo uz /api/auth");
+      const claims = jwt.decode(res.body.accessToken) as jwt.JwtPayload;
+      assert.equal(claims.sub, String(nurse._id));
+      assert.ok(claims.sid, "access token je vezan za sesiju");
+      assert.equal(claims.exp! - claims.iat!, 15 * 60, "access token traje 15 minuta");
     }
     const u = must(await User.findById(nurse._id));
     assert.equal(u.lastLoginMethod, "password");
     assert.ok(u.lastLoginAt);
   });
 
-  test("u bazi je samo heš refresh tokena", async () => {
-    const res = await login({ identifier: "sanja.s", password: PASSWORD });
+  test("u bazi je samo heš refresh tokena; sesija pamti uređaj", async () => {
+    const res = await login({ identifier: "sanja.s", password: PASSWORD }).set("User-Agent", "Firefox na odeljenju");
     const raw = decodeURIComponent(cookieOf(res).split("=")[1]!);
-    const stored = must(await Token.findOne());
-    assert.notEqual(stored.token, raw);
-    assert.equal(stored.token.length, 64);
+    const stored = must(await Session.findOne({ user: nurse._id, userAgent: "Firefox na odeljenju" }));
+    assert.equal(raw.split(".")[0], String(stored._id));
+    assert.equal(raw.includes(stored.tokenHash), false);
+    assert.equal(stored.tokenHash.length, 64);
   });
 
   test("ista poruka za nepostojećeg korisnika i pogrešnu lozinku (ne otkriva ko radi u domu)", async () => {
@@ -83,11 +98,37 @@ describe("POST /api/auth/login", () => {
 });
 
 describe("zaštita ruta", () => {
-  test("bez tokena → 401; lažan ili tuđim ključem potpisan → 403", async () => {
-    assert.equal((await request(app).get("/api/auth/verify")).status, 401);
-    assert.equal((await request(app).get("/api/auth/verify").set("Authorization", "Bearer nije.pravi.token")).status, 403);
-    const forged = jwt.sign({ _id: String(nurse._id), role: "admin" }, "drugi-kljuc");
-    assert.equal((await request(app).get("/api/auth/verify").set("Authorization", `Bearer ${forged}`)).status, 403);
+  test("bez tokena, lažan, tuđim ključem ili drugim algoritmom potpisan → 401", async () => {
+    const verify = (token?: string) => {
+      const req = request(app).get("/api/auth/verify");
+      return token ? req.set("Authorization", `Bearer ${token}`) : req;
+    };
+    assert.equal((await verify()).body.code, "token_missing");
+    assert.equal((await verify("nije.pravi.token")).status, 401);
+    const opts = { subject: String(nurse._id), issuer: "medikalija-api", audience: "medikalija-app" };
+    assert.equal((await verify(jwt.sign({ sid: "x" }, "drugi-kljuc", opts))).status, 401);
+    assert.equal((await verify(jwt.sign({ sid: "x" }, must(process.env.JWT_KEY), { ...opts, algorithm: "HS512" }))).status, 401, "samo HS256");
+    // Stari format tokena (bez sesije) više ne važi
+    assert.equal((await verify(jwt.sign({ _id: String(nurse._id), role: "admin" }, must(process.env.JWT_KEY)))).status, 401);
+  });
+
+  test("istekao access token → 401 token_expired (frontend tada osvežava sesiju)", async () => {
+    const res = await signIn();
+    const { sid } = jwt.decode(res.body.accessToken) as { sid: string };
+    const expired = jwt.sign({ sid }, must(process.env.JWT_KEY), { subject: String(nurse._id), issuer: "medikalija-api", audience: "medikalija-app", expiresIn: -10 });
+    const out = await request(app).get("/api/auth/verify").set("Authorization", `Bearer ${expired}`);
+    assert.equal(out.status, 401);
+    assert.equal(out.body.code, "token_expired");
+  });
+
+  test("odjava gasi i access token odmah (ne tek kad istekne)", async () => {
+    const res = await signIn();
+    const bearer = { Authorization: `Bearer ${res.body.accessToken}` };
+    assert.equal((await request(app).get("/api/auth/verify").set(bearer)).status, 200);
+    assert.equal((await request(app).post("/api/auth/logout").set("Cookie", cookieOf(res))).status, 200);
+    const after = await request(app).get("/api/auth/verify").set(bearer);
+    assert.equal(after.status, 401);
+    assert.equal(after.body.code, "session_revoked");
   });
 
   test("važeći token → korisnik bez tajni", async () => {
@@ -101,30 +142,120 @@ describe("zaštita ruta", () => {
     await User.updateOne({ _id: nurse._id }, { status: "suspended" });
     assert.equal((await request(app).get("/api/patient").set(authHeader(nurse))).status, 401);
   });
+
+  test("bezbednosna zaglavlja; nepoznata ruta i neispravan JSON bez internih detalja", async () => {
+    const res = await request(app).get("/api/auth/config");
+    assert.equal(res.headers["x-content-type-options"], "nosniff");
+    assert.ok(res.headers["strict-transport-security"]);
+    assert.equal(res.headers["x-powered-by"], undefined);
+    const missing = await request(app).get("/api/nema-ove-rute");
+    assert.equal(missing.status, 404);
+    assert.equal(missing.body.success, false);
+    const bad = await request(app).post("/api/auth/login").set("Content-Type", "application/json").send("{ovo nije json");
+    assert.equal(bad.status, 400);
+    assert.equal(JSON.stringify(bad.body).includes("JSON at position"), false);
+  });
 });
 
 describe("POST /api/auth/refresh", () => {
-  test("rotira refresh token: stari više ne važi", async () => {
-    const cookie = cookieOf(await login({ identifier: "sanja.s", password: PASSWORD }));
-    const refreshed = await request(app).post("/api/auth/refresh").set("Cookie", cookie);
+  test("rotira refresh token; ista sesija; nov access token", async () => {
+    const res = await signIn();
+    const cookie = cookieOf(res);
+    const refreshed = await refresh(cookie);
     assert.equal(refreshed.status, 200);
     assert.ok(refreshed.body.accessToken);
-    assert.equal((await request(app).post("/api/auth/refresh").set("Cookie", cookie)).status, 403, "iskorišćen refresh token mora biti odbijen");
+    assert.equal(refreshed.body.user.passwordHash, undefined);
+    assert.notEqual(cookieOf(refreshed), cookie, "novi refresh token");
+    const sid = (t: string) => (jwt.decode(t) as { sid: string }).sid;
+    assert.equal(sid(refreshed.body.accessToken), sid(res.body.accessToken), "ista sesija");
+    assert.equal((await refresh(cookieOf(refreshed))).status, 200, "novi token radi");
+  });
+
+  test("dva taba istovremeno: stari token važi još kratko posle rotacije", async () => {
+    const cookie = cookieOf(await signIn());
+    assert.equal((await refresh(cookie)).status, 200);
+    assert.equal((await refresh(cookie)).status, 200, "unutar kratkog roka (izgubljen odgovor, drugi tab)");
+  });
+
+  test("ponovna upotreba starog tokena posle roka = krađa: gasi celu sesiju", async () => {
+    const cookie = cookieOf(await signIn());
+    const rotated = await refresh(cookie);
+    await Session.updateMany({ user: nurse._id }, { $set: { rotatedAt: new Date(Date.now() - REUSE_GRACE_MS - 1000) } });
+    const reuse = await refresh(cookie);
+    assert.equal(reuse.status, 401);
+    assert.equal(reuse.body.code, "session_reused");
+    assert.equal((await refresh(cookieOf(rotated))).status, 401, "i token koji je dobio napadač/korisnik više ne važi");
+    const bearer = { Authorization: `Bearer ${rotated.body.accessToken}` };
+    assert.equal((await request(app).get("/api/auth/verify").set(bearer)).status, 401, "access token te sesije takođe");
+  });
+
+  test("apsolutni rok sesije: posle 30 dana nova prijava, bez obzira na aktivnost", async () => {
+    const cookie = cookieOf(await signIn());
+    await Session.updateMany({ user: nurse._id }, { $set: { absoluteExpiresAt: new Date(Date.now() - 1000) } });
+    const res = await refresh(cookie);
+    assert.equal(res.status, 401);
+    assert.equal(res.body.code, "session_expired");
+    assert.ok(SESSION_ABSOLUTE_MS >= 7 * 86_400_000);
+  });
+
+  test("bez kolačića, lažan ili stari (JWT) kolačić → 401", async () => {
+    assert.equal((await request(app).post("/api/auth/refresh")).status, 401);
+    assert.equal((await refresh("rt=nije-token")).status, 401);
+    const session = must(await Session.findOne({ user: nurse._id }));
+    assert.equal((await refresh(`rt=${session._id}.${"x".repeat(43)}`)).status, 401, "tuđ ID sesije bez tajne");
+    assert.ok(await Session.exists({ _id: session._id }), "pogađanje ne gasi tuđu sesiju");
+    const legacy = await request(app).post("/api/auth/refresh").set("Cookie", "refreshToken=stari.jwt.token");
+    assert.equal(legacy.status, 401);
+    assert.match(String(legacy.headers["set-cookie"]), /refreshToken=;/, "stari kolačić se briše");
+  });
+
+  test("zahtev sa tuđeg sajta (CSRF) se odbija", async () => {
+    const cookie = cookieOf(await signIn());
+    const evil = await refresh(cookie).set("Origin", "https://zlonamerni.example");
+    assert.equal(evil.status, 403);
+    assert.equal((await refresh(cookie).set("Origin", allowedOrigins()[0]!)).status, 200, "naš frontend");
   });
 
   test("suspendovan korisnik ne može da produži sesiju", async () => {
-    const cookie = cookieOf(await login({ identifier: "sanja.s", password: PASSWORD }));
+    const cookie = cookieOf(await signIn());
     await User.updateOne({ _id: nurse._id }, { status: "suspended" });
-    assert.equal((await request(app).post("/api/auth/refresh").set("Cookie", cookie)).status, 403);
-    assert.equal(await Token.countDocuments({ user: nurse._id }), 0);
+    assert.equal((await refresh(cookie)).status, 401);
+    assert.equal(await Session.countDocuments({ user: nurse._id }), 0);
   });
+});
 
-  test("stari (neheširani) refresh token iz baze još radi i rotira se u heširani", async () => {
-    const legacy = jwt.sign({ _id: String(nurse._id), role: "nurse", jti: "x" }, must(process.env.JWT_REFRESH_SECRET), { expiresIn: "7d" });
-    await Token.create({ user: nurse._id, token: legacy, expiresAt: new Date(Date.now() + 86_400_000) });
-    const res = await request(app).post("/api/auth/refresh").set("Cookie", `refreshToken=${legacy}`);
-    assert.equal(res.status, 200);
-    assert.equal(await Token.countDocuments({ token: legacy }), 0);
+describe("aktivni uređaji", () => {
+  test("lista mojih sesija, odjava jednog i svih ostalih", async () => {
+    const phone = await signIn().set("User-Agent", "Telefon");
+    const laptop = await signIn().set("User-Agent", "Laptop");
+    const asLaptop = { Authorization: `Bearer ${laptop.body.accessToken}` };
+
+    const list = await request(app).get("/api/auth/sessions").set(asLaptop);
+    assert.equal(list.status, 200);
+    const mine = list.body.sessions as Array<{ id: string; userAgent: string; current: boolean }>;
+    assert.equal(mine.find((s) => s.current)?.userAgent, "Laptop");
+    assert.equal(JSON.stringify(list.body).includes("tokenHash"), false, "heševi ne izlaze");
+
+    const phoneId = must(mine.find((s) => s.userAgent === "Telefon")).id;
+    assert.equal((await request(app).delete(`/api/auth/sessions/${phoneId}`).set(asLaptop)).status, 200);
+    assert.equal((await refresh(cookieOf(phone))).status, 401, "telefon je odjavljen");
+
+    const others = await request(app).post("/api/auth/sessions/revoke-others").set(asLaptop);
+    assert.equal(others.status, 200);
+    assert.equal((await request(app).get("/api/auth/verify").set(asLaptop)).status, 200, "trenutni uređaj ostaje");
+    assert.equal(await Session.countDocuments({ user: nurse._id }), 1);
+
+    const other = await createUser("nurse");
+    assert.equal((await request(app).delete(`/api/auth/sessions/${phoneId}`).set(authHeader(other))).status, 404, "tuđa sesija");
+  });
+});
+
+describe("ograničenje broja zahteva", () => {
+  test("zaboravljena lozinka: posle 5 zahteva sa iste adrese → 429", async () => {
+    for (let i = 0; i < 5; i++) assert.equal((await request(app).post("/api/auth/forgot").send({ identifier: `x${i}@dom.rs` })).status, 200);
+    const limited = await request(app).post("/api/auth/forgot").send({ identifier: "y@dom.rs" });
+    assert.equal(limited.status, 429);
+    assert.ok(Number(limited.headers["retry-after"]) > 0);
   });
 });
 
@@ -133,15 +264,15 @@ describe("promena sopstvene lozinke", () => {
     const phone = cookieOf(await login({ identifier: "sanja.s", password: PASSWORD }));
     const laptopRes = await login({ identifier: "sanja.s", password: PASSWORD });
     const laptop = cookieOf(laptopRes);
-    const change = (body: object) => request(app).post("/api/auth/password").set(authHeader(nurse)).set("Cookie", laptop).send(body);
+    const change = (body: object) => request(app).post("/api/auth/password").set("Authorization", `Bearer ${laptopRes.body.accessToken}`).send(body);
 
     assert.equal((await change({ currentPassword: "pogresna", newPassword: "nova-dobra-lozinka" })).status, 400);
     assert.equal((await change({ currentPassword: PASSWORD, newPassword: "kratka" })).status, 400);
     assert.equal((await change({ currentPassword: PASSWORD, newPassword: "sanja12345678" })).status, 400, "ne sme sadržati ime");
     assert.equal((await change({ currentPassword: PASSWORD, newPassword: "nova-dobra-lozinka" })).status, 200);
 
-    assert.equal((await request(app).post("/api/auth/refresh").set("Cookie", phone)).status, 403, "drugi uređaj je odjavljen");
-    assert.equal((await request(app).post("/api/auth/refresh").set("Cookie", laptop)).status, 200, "trenutni ostaje prijavljen");
+    assert.equal((await refresh(phone)).status, 401, "drugi uređaj je odjavljen");
+    assert.equal((await refresh(laptop)).status, 200, "trenutni ostaje prijavljen");
     assert.equal((await login({ identifier: "sanja.s", password: "nova-dobra-lozinka" })).status, 200);
   });
 });
