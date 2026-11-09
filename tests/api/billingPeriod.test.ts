@@ -365,3 +365,56 @@ describe("izbor aktivnog perioda", () => {
     assert.equal((await get(`/api/specification/${patient._id}/periods`, nurse)).status, 403);
   });
 });
+
+describe("izbor perioda specifikacije (smeštaj za period ide sam za njim)", () => {
+  type Row = { startDate: string; endDate: string; specificationId: string | null; isActive: boolean; isBilling: boolean; isCurrent: boolean };
+  const list = async (patientId: unknown): Promise<Row[]> => (await get(`/api/specification/${patientId}/periods`)).body.periods;
+  const choose = (patientId: unknown, body: object, user: UserDoc = admin) => post(`/api/specification/${patientId}/billing-period`, body, user);
+
+  test("raniji period iz liste: postaje period specifikacije, smeštaj je period posle njega", async () => {
+    const { patient, active, billing } = await setup(100);
+    const before = await list(patient._id);
+    assert.equal(must(before.find((p) => p.isBilling)).specificationId, billing._id);
+
+    const oldest = before[before.length - 1]!;
+    const res = await choose(patient._id, { startDate: key(oldest.startDate), endDate: key(oldest.endDate) });
+    assert.equal(res.status, 200, res.body.message);
+    assert.equal(key(res.body.specification.startDate), key(oldest.startDate));
+    const second = before[before.length - 2]!;
+    assert.equal(key(res.body.active.startDate), key(second.startDate), "smeštaj za period je sledeći period");
+
+    const nowBilling = (await get(`/api/specification/${patient._id}/billing-period`)).body.specification;
+    assert.equal(key(nowBilling.startDate), key(oldest.startDate));
+    assert.equal(key((await get(`/api/specification/${patient._id}`)).body.specification.startDate), key(second.startDate));
+
+    // Nazad na podrazumevano: period specifikacije je onaj pre današnjeg
+    const back = await choose(patient._id, { specificationId: billing._id });
+    assert.equal(back.status, 200, back.body.message);
+    assert.equal(back.body.active._id, active._id);
+  });
+
+  test("ručni datumi: smeštaj počinje dan posle kraja, 30 dana", async () => {
+    const { patient } = await setup(100);
+    const res = await choose(patient._id, { startDate: key(day(-40)), endDate: key(day(-5)) });
+    assert.equal(res.status, 200, res.body.message);
+    assert.equal(key(res.body.active.startDate), key(day(-4)));
+    assert.equal(key(res.body.active.endDate), key(day(25)));
+    const current = (await get(`/api/specification/${patient._id}/billing-period`)).body.specification;
+    assert.equal(key(current.startDate), key(day(-40)));
+  });
+
+  test("današnji period kao period specifikacije: smeštaj ide unapred", async () => {
+    const { patient, active } = await setup(100);
+    const res = await choose(patient._id, { specificationId: active._id });
+    assert.equal(res.status, 200, res.body.message);
+    assert.equal(key(res.body.active.startDate), key(new Date(new Date(active.endDate).getTime() + DAY_MS)));
+  });
+
+  test("provere: budućnost, neispravni datumi, uloga", async () => {
+    const { patient } = await setup(100);
+    assert.equal((await choose(patient._id, { startDate: key(day(3)), endDate: key(day(20)) })).status, 409);
+    assert.equal((await choose(patient._id, { startDate: key(day(-3)), endDate: key(day(-10)) })).status, 400);
+    assert.equal((await choose(patient._id, { specificationId: "x" })).status, 400);
+    assert.equal((await choose(patient._id, { startDate: key(day(-40)), endDate: key(day(-5)) }, nurse)).status, 403);
+  });
+});

@@ -1,7 +1,7 @@
 import express from "express"
 import authMiddleware from "../middleware/authMiddleware.js"
 import { requireManager } from "../middleware/requireRole.js"
-import { getNonStandardPeriods, openNonStandard, updateSpecificationItemAmount, getBillingPeriod, getPastPeriods, getSelectablePeriods, openPeriod, changeDates, activatePeriod, activateNextPeriod, activateExisting, addCostsToSpecification, calculatePreview, deleteSpecificationItem, getFutureSpecificationPeriods, getSpecification, getSpecificationById, getSpecificationHistory, saveBillingForSpecification } from "../controllers/specificationController.js"
+import { chooseBillingPeriod, getNonStandardPeriods, openNonStandard, updateSpecificationItemAmount, getBillingPeriod, getPastPeriods, getSelectablePeriods, openPeriod, changeDates, activatePeriod, activateNextPeriod, activateExisting, addCostsToSpecification, calculatePreview, deleteSpecificationItem, getFutureSpecificationPeriods, getSpecification, getSpecificationById, getSpecificationHistory, saveBillingForSpecification } from "../controllers/specificationController.js"
 
 const router = express.Router()
 
@@ -9,6 +9,8 @@ const router = express.Router()
 router.get("/:patientId", authMiddleware, getSpecification)
 // Period specifikacije (pre aktivnog) — u njemu se uglavnom pravi obračun
 router.get("/:patientId/billing-period", authMiddleware, requireManager, getBillingPeriod)
+// Izbor perioda specifikacije; smeštaj za period ide sam za njim
+router.post("/:patientId/billing-period", authMiddleware, requireManager, chooseBillingPeriod)
 router.get("/:patientId/non-standard", authMiddleware, requireManager, getNonStandardPeriods)
 router.post("/:patientId/non-standard", authMiddleware, requireManager, openNonStandard)
 router.get("/:patientId/past-periods", authMiddleware, requireManager, getPastPeriods)
