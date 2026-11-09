@@ -15,6 +15,7 @@ import {
   changeSpecificationDates,
   listNonStandardPeriods,
   openNonStandardPeriod,
+  setBillingPeriod,
 } from "../services/getOrCreateActiveSpecification.js";
 import GlobalSetting from "../models/GlobalSetting.js";
 import { nextPeriodAfter, normalizeStoredDay } from "../utils/dateUtils.js";
@@ -107,6 +108,17 @@ const openPeriod = async (req: Request, res: Response) => {
   try {
     const specification = await openPastPeriod(param(req, "patientId"), req.body?.startDate, req.body?.endDate);
     return res.json({ success: true, specification });
+  } catch (err) {
+    return res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
+  }
+};
+
+// Izbor perioda specifikacije { specificationId } ili { startDate, endDate };
+// smeštaj za period (aktivan) se postavlja sam — period posle njega
+const chooseBillingPeriod = async (req: Request, res: Response) => {
+  try {
+    const { billing, active } = await setBillingPeriod(param(req, "patientId"), req.body ?? {});
+    return res.json({ success: true, specification: billing, active });
   } catch (err) {
     return res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
   }
@@ -422,4 +434,4 @@ const getFutureSpecificationPeriods = async (req: Request, res: Response) => {
   }
 };
 
-export {getNonStandardPeriods, openNonStandard, updateSpecificationItemAmount, getSpecification, getBillingPeriod, getPastPeriods, getSelectablePeriods, openPeriod, changeDates, activatePeriod, activateNextPeriod, activateExisting, getFutureSpecificationPeriods, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}
+export {chooseBillingPeriod, getNonStandardPeriods, openNonStandard, updateSpecificationItemAmount, getSpecification, getBillingPeriod, getPastPeriods, getSelectablePeriods, openPeriod, changeDates, activatePeriod, activateNextPeriod, activateExisting, getFutureSpecificationPeriods, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}

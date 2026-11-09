@@ -157,8 +157,13 @@ export async function activateSpecificationPeriod(patientId: Id, startDate: unkn
     throw httpError(400, "Neispravan opseg datuma");
   }
 
-  // Redovni periodi koji se preklapaju sa izabranim: prazni se uklanjaju (novi ih zamenjuje),
-  // a period sa stavkama se ne dira — tada ništa ne menjamo i javljamo koji je
+  const spec = await replaceRange(patientId, start, end);
+  return setActiveSpec(patientId, spec);
+}
+
+// Zapis za ručno unet opseg. Redovni periodi koji se preklapaju sa njim: prazni se uklanjaju
+// (novi ih zamenjuje), a period sa stavkama se ne dira — tada ništa ne menjamo i javljamo koji je.
+async function replaceRange(patientId: Id, start: Date, end: Date): Promise<SpecificationDoc> {
   const overlapping = dated(await Specification.find({ patientId, ...STANDARD })).filter(
     (x) => x.start <= end && x.end >= start && !(x.start.getTime() === start.getTime() && x.end.getTime() === end.getTime())
   );
@@ -167,9 +172,47 @@ export async function activateSpecificationPeriod(patientId: Id, startDate: unkn
     throw httpError(409, `Preklapa se sa periodom ${fmtDay(withItems.start)} – ${fmtDay(withItems.end)} koji ima stavke. Izmenite njegove datume („Izmeni datume”) ili izaberite druge datume.`);
   }
   if (overlapping.length) await Specification.deleteMany({ _id: { $in: overlapping.map((x) => x.spec._id) } });
+  return findOrCreateSpecForRange(patientId, start, end);
+}
 
-  const spec = await findOrCreateSpecForRange(patientId, start, end);
-  return setActiveSpec(patientId, spec);
+// Bira PERIOD SPECIFIKACIJE (postojeći zapis ili ručni datumi). Smeštaj za period (aktivan)
+// se ne bira — uvek je to period koji počinje dan posle kraja perioda specifikacije
+// (postojeći zapis tog dana ili novih 30 dana) i naplaćuje se unapred.
+export async function setBillingPeriod(
+  patientId: Id,
+  { specificationId, startDate, endDate }: { specificationId?: unknown; startDate?: unknown; endDate?: unknown }
+): Promise<{ billing: SpecificationDoc; active: SpecificationDoc }> {
+  const patient = await Patient.findById(patientId);
+  if (!patient) throw httpError(404, "Pacijent nije pronađen");
+  if (patient.dischargeDate) throw httpError(409, "Pacijent je otpušten.");
+
+  let billing: SpecificationDoc;
+  if (specificationId) {
+    if (!Types.ObjectId.isValid(String(specificationId))) throw httpError(400, "Neispravan period.");
+    const found = await Specification.findOne({ _id: specificationId, patientId, ...STANDARD });
+    if (!found) throw httpError(404, "Period nije pronađen.");
+    billing = found;
+  } else {
+    const start = parseCalendarDay(startDate);
+    const end = parseCalendarDay(endDate);
+    if (!start || !end || end < start) throw httpError(400, "Neispravan opseg datuma");
+    if (start > today()) throw httpError(409, "Period specifikacije ne može početi u budućnosti.");
+    billing = await replaceRange(patientId, start, end);
+  }
+
+  const billingStart = normalizeStoredDay(billing.startDate);
+  const billingEnd = normalizeStoredDay(billing.endDate);
+  if (!billingStart || !billingEnd) throw httpError(400, "Neispravan period.");
+  if (billingStart > today()) throw httpError(409, "Period specifikacije ne može početi u budućnosti.");
+
+  // Smeštaj za period: zapis koji počinje dan posle (npr. ručno menjanih datuma), inače novih 30 dana
+  const nextStart = addDays(billingEnd, 1);
+  const following = await Specification.findOne({ patientId, ...STANDARD, _id: { $ne: billing._id }, startDate: sameDayQuery(nextStart) });
+  const next = following ?? (await replaceRange(patientId, nextStart, nextPeriodAfter(billingEnd).endDate));
+  const active = await setActiveSpec(patientId, next);
+  const fresh = await Specification.findById(billing._id);
+  if (!fresh) throw httpError(404, "Period nije pronađen.");
+  return { billing: fresh, active };
 }
 
 // Aktivira period koji se nadovezuje na trenutno aktivan (dan posle njegovog
@@ -349,6 +392,8 @@ export async function listPastPeriods(patientId: Id): Promise<PastPeriod[]> {
 export interface SelectablePeriod extends PastPeriod {
   /** Trenutno aktivan period (smeštaj za period) */
   isActive: boolean;
+  /** Period specifikacije: završava se dan pre aktivnog */
+  isBilling: boolean;
   /** Period u koji pada današnji dan */
   isCurrent: boolean;
 }
@@ -372,6 +417,8 @@ export async function listSelectablePeriods(patientId: Id): Promise<SelectablePe
   const { periods, skipped } = buildPeriodChain(admission, specs, lastEnd ? addDays(lastEnd, 1) : until);
 
   const isActive = (spec: SpecificationDoc | null) => !!active && !!spec && spec._id.equals(active._id);
+  const activeStart = normalizeStoredDay(active?.startDate);
+  const billingEnd = activeStart ? addDays(activeStart, -1).getTime() : null;
   const toPeriod = (start: Date, end: Date, spec: SpecificationDoc | null): SelectablePeriod => ({
     startDate: start,
     endDate: end,
@@ -379,6 +426,7 @@ export async function listSelectablePeriods(patientId: Id): Promise<SelectablePe
     itemsCount: spec?.items.length ?? 0,
     totalPrice: spec?.totalPrice ?? 0,
     isActive: isActive(spec),
+    isBilling: !isActive(spec) && end.getTime() === billingEnd,
     isCurrent: start <= day && day <= end,
   });
   const result = periods.map((p) => toPeriod(p.startDate, p.endDate, p.spec));
