@@ -14,6 +14,7 @@ import articlesRouter from "./routes/articles.js"
 import specificationRouter from "./routes/specification.js"
 import combinationGroupRouter from "./routes/combinationGroup.js"
 import nurseActionRouter from "./routes/nurseActionsRoutes.js"
+import activityRouter from "./routes/activity.js"
 import calendarRoutes from "./routes/calendarRoutes.js"
 import notificationRoutes from "./routes/notification.js"
 import searchRouter from "./routes/search.js"
@@ -75,6 +76,7 @@ app.use('/api/articles', articlesRouter)
 app.use('/api/specification', specificationRouter)
 app.use('/api/combinationGroup', combinationGroupRouter)
 app.use('/api/nurse-actions', nurseActionRouter)
+app.use('/api/activity', activityRouter)
 app.use('/api/calendar', calendarRoutes)
 app.use('/api/notifications', notificationRoutes)
 app.use("/api/search", searchRouter);
