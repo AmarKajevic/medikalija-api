@@ -333,3 +333,35 @@ describe("obračun: dug i smeštaj su opcioni", () => {
     assert.equal((await post(`/api/specification/${active._id}/billing`, { previousDebtEUR: 1 }, nurse)).status, 403);
   });
 });
+
+describe("izbor aktivnog perioda", () => {
+  type Row = { startDate: string; endDate: string; specificationId: string | null; isActive: boolean; isCurrent: boolean };
+  const list = async (patientId: unknown): Promise<Row[]> => (await get(`/api/specification/${patientId}/periods`)).body.periods;
+
+  test("posle povratka na raniji period mogu se izabrati i kasniji, današnji i jedan unapred", async () => {
+    const { patient, active } = await setup(100);
+    const before = await list(patient._id);
+    // 100 dana: 4 perioda do današnjeg + 1 unapred, od najnovijeg
+    assert.equal(before.length, 5);
+    assert.equal(before[1]!.specificationId, active._id);
+    assert.ok(before[1]!.isActive && before[1]!.isCurrent);
+    assert.ok(key(before[0]!.startDate) > key(day(0)), "prvi je period unapred");
+
+    // Povratak na period od pre ~3 meseca
+    const oldest = before[before.length - 1]!;
+    const back = await post(`/api/specification/${patient._id}/activate`, { startDate: key(oldest.startDate), endDate: key(oldest.endDate) });
+    assert.equal(back.status, 200, back.body.message);
+
+    const after = await list(patient._id);
+    assert.equal(after.length, 5, "kasniji periodi ne nestaju");
+    assert.ok(after[after.length - 1]!.isActive, "aktivan je najstariji");
+    const current = must(after.find((p) => p.isCurrent));
+    assert.equal(current.specificationId, active._id);
+
+    // Vraćanje na današnji period
+    const forward = await post(`/api/specification/${patient._id}/activate/${current.specificationId}`, {});
+    assert.equal(forward.status, 200, forward.body.message);
+    assert.equal((await get(`/api/specification/${patient._id}`)).body.specification._id, active._id);
+    assert.equal((await get(`/api/specification/${patient._id}/periods`, nurse)).status, 403);
+  });
+});

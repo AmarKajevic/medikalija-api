@@ -1,7 +1,7 @@
 import express from "express"
 import authMiddleware from "../middleware/authMiddleware.js"
 import { requireManager } from "../middleware/requireRole.js"
-import { getNonStandardPeriods, openNonStandard, updateSpecificationItemAmount, getBillingPeriod, getPastPeriods, openPeriod, changeDates, activatePeriod, activateNextPeriod, activateExisting, addCostsToSpecification, calculatePreview, deleteSpecificationItem, getFutureSpecificationPeriods, getSpecification, getSpecificationById, getSpecificationHistory, saveBillingForSpecification } from "../controllers/specificationController.js"
+import { getNonStandardPeriods, openNonStandard, updateSpecificationItemAmount, getBillingPeriod, getPastPeriods, getSelectablePeriods, openPeriod, changeDates, activatePeriod, activateNextPeriod, activateExisting, addCostsToSpecification, calculatePreview, deleteSpecificationItem, getFutureSpecificationPeriods, getSpecification, getSpecificationById, getSpecificationHistory, saveBillingForSpecification } from "../controllers/specificationController.js"
 
 const router = express.Router()
 
@@ -12,6 +12,8 @@ router.get("/:patientId/billing-period", authMiddleware, requireManager, getBill
 router.get("/:patientId/non-standard", authMiddleware, requireManager, getNonStandardPeriods)
 router.post("/:patientId/non-standard", authMiddleware, requireManager, openNonStandard)
 router.get("/:patientId/past-periods", authMiddleware, requireManager, getPastPeriods)
+// Svi periodi za izbor aktivnog (i kasniji od aktivnog, da se može vratiti napred)
+router.get("/:patientId/periods", authMiddleware, requireManager, getSelectablePeriods)
 router.post("/:patientId/periods", authMiddleware, requireManager, openPeriod)
 router.put("/:patientId/periods/:specId", authMiddleware, requireManager, changeDates)
 router.post("/:patientId/activate", authMiddleware, activatePeriod)

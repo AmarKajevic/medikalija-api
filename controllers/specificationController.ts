@@ -10,6 +10,7 @@ import {
   buildSpecificationSchedule,
   futureScheduleHorizon,
   listPastPeriods,
+  listSelectablePeriods,
   openPastPeriod,
   changeSpecificationDates,
   listNonStandardPeriods,
@@ -57,6 +58,16 @@ const getBillingPeriod = async (req: Request, res: Response) => {
 const getPastPeriods = async (req: Request, res: Response) => {
   try {
     const periods = await listPastPeriods(param(req, "patientId"));
+    return res.json({ success: true, periods });
+  } catch (err) {
+    return res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
+  }
+};
+
+// Periodi među kojima se bira aktivan: od prijema do današnjeg i jedan unapred
+const getSelectablePeriods = async (req: Request, res: Response) => {
+  try {
+    const periods = await listSelectablePeriods(param(req, "patientId"));
     return res.json({ success: true, periods });
   } catch (err) {
     return res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
@@ -411,4 +422,4 @@ const getFutureSpecificationPeriods = async (req: Request, res: Response) => {
   }
 };
 
-export {getNonStandardPeriods, openNonStandard, updateSpecificationItemAmount, getSpecification, getBillingPeriod, getPastPeriods, openPeriod, changeDates, activatePeriod, activateNextPeriod, activateExisting, getFutureSpecificationPeriods, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}
+export {getNonStandardPeriods, openNonStandard, updateSpecificationItemAmount, getSpecification, getBillingPeriod, getPastPeriods, getSelectablePeriods, openPeriod, changeDates, activatePeriod, activateNextPeriod, activateExisting, getFutureSpecificationPeriods, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}

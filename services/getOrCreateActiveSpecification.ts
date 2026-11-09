@@ -346,6 +346,51 @@ export async function listPastPeriods(patientId: Id): Promise<PastPeriod[]> {
   return result.sort((a, b) => b.startDate.getTime() - a.startDate.getTime());
 }
 
+export interface SelectablePeriod extends PastPeriod {
+  /** Trenutno aktivan period (smeštaj za period) */
+  isActive: boolean;
+  /** Period u koji pada današnji dan */
+  isCurrent: boolean;
+}
+
+// Svi redovni periodi među kojima uprava bira aktivan: od prijema do današnjeg
+// (ili aktivnog, ako je kasniji) i još jedan unapred, od najnovijeg. Posle povratka
+// na raniji period ovde su i kasniji periodi, pa se uvek može vratiti napred.
+export async function listSelectablePeriods(patientId: Id): Promise<SelectablePeriod[]> {
+  const patient = await Patient.findById(patientId);
+  if (!patient) throw httpError(404, "Pacijent nije pronađen");
+  const active = patient.dischargeDate ? null : await getActiveSpecification(patientId, patient);
+  const admission = normalizeStoredDay(patient.admissionDate);
+  const specs = await Specification.find({ patientId, ...STANDARD });
+
+  const day = today();
+  const activeEnd = normalizeStoredDay(active?.endDate);
+  const until = activeEnd && activeEnd > day ? activeEnd : day;
+  // Prvo do današnjeg/aktivnog, pa još jedan period posle njega
+  const base = buildPeriodChain(admission, specs, until).periods;
+  const lastEnd = base[base.length - 1]?.endDate;
+  const { periods, skipped } = buildPeriodChain(admission, specs, lastEnd ? addDays(lastEnd, 1) : until);
+
+  const isActive = (spec: SpecificationDoc | null) => !!active && !!spec && spec._id.equals(active._id);
+  const toPeriod = (start: Date, end: Date, spec: SpecificationDoc | null): SelectablePeriod => ({
+    startDate: start,
+    endDate: end,
+    specificationId: spec ? String(spec._id) : null,
+    itemsCount: spec?.items.length ?? 0,
+    totalPrice: spec?.totalPrice ?? 0,
+    isActive: isActive(spec),
+    isCurrent: start <= day && day <= end,
+  });
+  const result = periods.map((p) => toPeriod(p.startDate, p.endDate, p.spec));
+  // Zapisi koji se preklapaju sa lancem (stari podaci) se ne kriju
+  for (const spec of skipped) {
+    const start = normalizeStoredDay(spec.startDate);
+    const end = normalizeStoredDay(spec.endDate);
+    if (start && end) result.push({ ...toPeriod(start, end, spec), isCurrent: false });
+  }
+  return result.sort((a, b) => b.startDate.getTime() - a.startDate.getTime());
+}
+
 // Otvara raniji period (pravi zapis ako ne postoji) BEZ menjanja aktivnog perioda —
 // uprava u njemu dodaje stavke i pravi obračun.
 export async function openPastPeriod(patientId: Id, startDate: unknown, endDate: unknown): Promise<SpecificationDoc> {
