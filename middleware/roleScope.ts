@@ -4,15 +4,18 @@
 import type { Request } from "express";
 
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "*";
-type Rule = [Method | Method[], string];
+// Putanja je prefiks (string) ili tačan obrazac (RegExp) kad treba samo jedna ruta iz grupe
+type Rule = [Method | Method[], string | RegExp];
 
 const SCOPES: Record<string, Rule[]> = {
-  // Socijalni radnik: osnovni podaci o pacijentu, socijalni karton, kalendar.
+  // Socijalni radnik: osnovni podaci o pacijentu, socijalni karton, raspored perioda, kalendar.
   // Ne vidi specifikacije, lekove, artikle ni medicinsku dokumentaciju.
   "social-worker": [
     ["*", "/api/auth"],
     ["GET", "/api/patient"],
     ["*", "/api/social-notes"],
+    // Samo raspored perioda (datumi), ne i same specifikacije
+    ["GET", /^\/api\/specification\/[^/]+\/future-spec-periods$/],
     ["*", "/api/calendar"],
     ["GET", "/api/dashboard"],
     ["*", "/api/notifications"],
@@ -33,7 +36,8 @@ const SCOPES: Record<string, Rule[]> = {
   ],
 };
 
-const matches = (path: string, prefix: string) => path === prefix || path.startsWith(`${prefix}/`);
+const matches = (path: string, rule: string | RegExp) =>
+  typeof rule === "string" ? path === rule || path.startsWith(`${rule}/`) : rule.test(path);
 
 /** Da li uloga sme da pozove ovaj zahtev (uloge bez liste nisu ograničene ovde). */
 export function allowedByScope(role: string, req: Pick<Request, "method" | "originalUrl">): boolean {

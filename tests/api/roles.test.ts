@@ -44,6 +44,17 @@ describe("socijalni radnik: samo ono što mu treba", () => {
     assert.equal((await sw.post("/api/patient/addPatient", { name: "X" })).status, 403);
   });
 
+  test("vidi raspored perioda, ali ne i ostale rute specifikacije", async () => {
+    const sw = as(social);
+    const res = await sw.get(`/api/specification/${patient._id}/future-spec-periods`);
+    assert.equal(res.status, 200);
+    assert.ok(res.body.periods.length > 200);
+    for (const url of [`/api/specification/${patient._id}`, `/api/specification/${patient._id}/past-periods`, `/api/specification/history/${patient._id}`]) {
+      assert.equal((await sw.get(url)).status, 403, url);
+    }
+    assert.equal((await sw.post(`/api/specification/${patient._id}/activate`)).status, 403);
+  });
+
   test("pretraga mu vraća samo pacijente", async () => {
     await Medicine.create({ name: "Milgamma", quantity: 1 });
     const res = await as(social).get("/api/search?q=mil");
