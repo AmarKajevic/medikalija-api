@@ -6,8 +6,9 @@
 //    pa odjava uređaja / suspendovanje / nova lozinka važe odmah, ne tek kad token istekne.
 //  - REFRESH token je nasumičan (nije JWT): "<sid>.<32 nasumična bajta>", u httpOnly kolačiću
 //    ograničenom na /api/auth. U bazi je samo SHA-256 heš.
-//  - Rotacija pri svakom osvežavanju. Prethodni token važi još REUSE_GRACE_MS (dva taba, izgubljen
-//    odgovor); posle toga njegova upotreba znači da je token ukraden → gasi se cela sesija.
+//  - Rotacija pri svakom osvežavanju. Prethodni token važi dok novi nije upotrebljen (izgubljen odgovor,
+//    reload usred osvežavanja, dva taba) — tada se samo izda nov. Token koji je već zamenjen pa
+//    upotrebljen (i stari i novi su u opticaju) znači krađu → gasi se cela sesija.
 //  - Neaktivnost 7 dana i apsolutni rok 30 dana (posle toga nova prijava).
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
@@ -23,7 +24,8 @@ type Id = Types.ObjectId | string;
 export const ACCESS_TTL_SECONDS = 15 * 60;
 export const SESSION_IDLE_MS = 7 * 24 * 60 * 60 * 1000;
 export const SESSION_ABSOLUTE_MS = 30 * 24 * 60 * 60 * 1000;
-export const REUSE_GRACE_MS = 10_000;
+/** Koliko zamenjenih heševa sesija pamti (za otkrivanje krađe) */
+const MAX_RETIRED = 50;
 const ISSUER = "medikalija-api";
 const AUDIENCE = "medikalija-app";
 
@@ -116,14 +118,21 @@ export async function rotateSession(raw: unknown, req: Request, attempt = 0): Pr
   const hash = hashToken(parsed.secret);
   const isCurrent = sameHash(hash, session.tokenHash);
   const isPrevious = !isCurrent && sameHash(hash, session.prevTokenHash);
-  // Netačan token uz tuđ ID sesije ne gasi sesiju (ID nije tajna — inače bi to bio način da se neko odjavi)
-  if (!isCurrent && !isPrevious) return { ok: false, reason: "invalid" };
-  if (isPrevious && (!session.rotatedAt || now.getTime() - session.rotatedAt.getTime() > REUSE_GRACE_MS)) {
-    await Session.deleteOne({ _id: session._id });
-    securityEvent("refresh_token_reuse", { userId: String(session.user), sessionId: String(session._id), ip: req.ip });
-    return { ok: false, reason: "reused" };
+  if (!isCurrent && !isPrevious) {
+    // Zamenjen token u opticaju: neko ga je sačuvao (krađa) — gasi se sesija i za napadača i za korisnika
+    if (session.retiredHashes.some((h) => sameHash(hash, h))) {
+      await Session.deleteOne({ _id: session._id });
+      securityEvent("refresh_token_reuse", { userId: String(session.user), sessionId: String(session._id), ip: req.ip });
+      return { ok: false, reason: "reused" };
+    }
+    // Netačan token uz tuđ ID sesije ne gasi sesiju (ID nije tajna — inače bi to bio način da se neko odjavi)
+    return { ok: false, reason: "invalid" };
   }
 
+  // Važeći token: on postaje prethodni. Prethodni (klijent nije dobio novi): izdaje se nov,
+  // a neupotrebljeni važeći se povlači (ako ga ipak neko pokaže, to je krađa).
+  const retire = isCurrent ? session.prevTokenHash : session.tokenHash;
+  const retired = [...session.retiredHashes, ...(retire ? [retire] : [])].slice(-MAX_RETIRED);
   const secret = newSecret();
   const idleEnd = Math.min(now.getTime() + SESSION_IDLE_MS, session.absoluteExpiresAt.getTime());
   // Uslov na heš koji smo videli: dva istovremena osvežavanja ne rotiraju dvaput od istog stanja
@@ -133,6 +142,7 @@ export async function rotateSession(raw: unknown, req: Request, attempt = 0): Pr
       $set: {
         tokenHash: hashToken(secret),
         prevTokenHash: isCurrent ? session.tokenHash : session.prevTokenHash,
+        retiredHashes: retired,
         rotatedAt: now,
         lastUsedAt: now,
         expiresAt: new Date(idleEnd),

@@ -29,7 +29,9 @@ import settingsRouter from "./routes/settings.js"
 import nurseEntriesRouter from "./routes/nurseEntries.js"
 import careTasksRouter from "./routes/careTasks.js"
 import lodgingPricesRouter from "./routes/lodgingPrices.js";
+import lodgingNotesRouter from "./routes/lodgingNotes.js";
 import physioPricesRouter from "./routes/physioPrices.js";
+import professionalServicesRouter from "./routes/professionalServices.js";
 import medicalReportsRouter from "./routes/medicalReports.js"
 import socialNotesRouter from "./routes/socialNotes.js"
 
@@ -90,7 +92,9 @@ app.use("/api/settings", settingsRouter);
 app.use("/api/nurse-entries", nurseEntriesRouter);
 app.use("/api/care-tasks", careTasksRouter);
 app.use("/api/lodging-prices", lodgingPricesRouter);
+app.use("/api/lodging-notes", lodgingNotesRouter);
 app.use("/api/physio-prices", physioPricesRouter);
+app.use("/api/professional-services", professionalServicesRouter);
 app.use("/api/medical-reports", medicalReportsRouter);
 app.use("/api/social-notes", socialNotesRouter);
 

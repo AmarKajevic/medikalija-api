@@ -79,6 +79,8 @@ const specificationSchema = new mongoose.Schema({
     earlyLodgingEUR: { type: Number, default: 0 },
     earlyLodgingRSD: { type: Number, default: 0 },
     earlyLodgingOption: { type: String, default: "" },
+    /** Napomena uz vanstandardni smeštaj (iz liste koju pravi admin) — štampa se u istom redu */
+    earlyLodgingNote: { type: String, default: "" },
 
     specEUR: { type: Number, default: 0 },             // specifikacija u evrima
     totalRSD: { type: Number, default: 0 },
