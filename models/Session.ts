@@ -8,9 +8,11 @@ const sessionSchema = new mongoose.Schema(
     user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     /** SHA-256 važećeg refresh tokena */
     tokenHash: { type: String, required: true },
-    /** Prethodni token: prihvata se još kratko posle rotacije (dva taba, izgubljen odgovor); kasnije je to krađa */
+    /** Token kojim je dobijen važeći: prihvata se ponovo dok važeći nije upotrebljen (izgubljen odgovor, dva taba) */
     prevTokenHash: { type: String, default: null },
     rotatedAt: { type: Date, default: null },
+    /** Zamenjeni tokeni: njihova upotreba znači da je token ukraden → gasi se cela sesija */
+    retiredHashes: { type: [String], default: [] },
     method: { type: String, enum: ["password", "google"], required: true },
     userAgent: { type: String, default: "", maxlength: 300 },
     ip: { type: String, default: "" },

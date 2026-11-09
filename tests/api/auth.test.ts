@@ -5,7 +5,7 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import app from "../../app.js";
 import Session from "../../models/Session.js";
-import { REUSE_GRACE_MS, SESSION_ABSOLUTE_MS } from "../../services/auth/sessions.js";
+import { SESSION_ABSOLUTE_MS } from "../../services/auth/sessions.js";
 import User from "../../models/User.js";
 import { allowedOrigins } from "../../utils/cors.js";
 import { authHeader, createUser, must, useTestDatabase, type UserDoc } from "../helpers/setup.js";
@@ -171,22 +171,36 @@ describe("POST /api/auth/refresh", () => {
     assert.equal((await refresh(cookieOf(refreshed))).status, 200, "novi token radi");
   });
 
-  test("dva taba istovremeno: stari token važi još kratko posle rotacije", async () => {
+  test("izgubljen odgovor (reload usred osvežavanja): stari token radi i kasnije — nema odjave", async () => {
     const cookie = cookieOf(await signIn());
-    assert.equal((await refresh(cookie)).status, 200);
-    assert.equal((await refresh(cookie)).status, 200, "unutar kratkog roka (izgubljen odgovor, drugi tab)");
+    assert.equal((await refresh(cookie)).status, 200, "server je rotirao, ali odgovor nije stigao do browsera");
+    await Session.updateMany({ user: nurse._id }, { $set: { rotatedAt: new Date(Date.now() - 20 * 60_000) } });
+    const later = await refresh(cookie);
+    assert.equal(later.status, 200, "i posle 20 minuta, jer novi token niko nije upotrebio");
+    assert.equal((await refresh(cookieOf(later))).status, 200, "nastavlja se normalno");
   });
 
-  test("ponovna upotreba starog tokena posle roka = krađa: gasi celu sesiju", async () => {
-    const cookie = cookieOf(await signIn());
-    const rotated = await refresh(cookie);
-    await Session.updateMany({ user: nurse._id }, { $set: { rotatedAt: new Date(Date.now() - REUSE_GRACE_MS - 1000) } });
-    const reuse = await refresh(cookie);
+  test("krađa: zamenjen token upotrebljen pošto je novi već korišćen → gasi se cela sesija", async () => {
+    const stolen = cookieOf(await signIn());
+    const second = await refresh(stolen); // korisnik osvežava
+    const third = await refresh(cookieOf(second)); // i opet — tok je odmakao
+    const reuse = await refresh(stolen); // napadač pokušava sa ukradenim
     assert.equal(reuse.status, 401);
     assert.equal(reuse.body.code, "session_reused");
-    assert.equal((await refresh(cookieOf(rotated))).status, 401, "i token koji je dobio napadač/korisnik više ne važi");
-    const bearer = { Authorization: `Bearer ${rotated.body.accessToken}` };
+    assert.equal((await refresh(cookieOf(third))).status, 401, "sesija je ugašena i za korisnika (mora ponovo da se prijavi)");
+    const bearer = { Authorization: `Bearer ${third.body.accessToken}` };
     assert.equal((await request(app).get("/api/auth/verify").set(bearer)).status, 401, "access token te sesije takođe");
+  });
+
+  test("krađa pre korisnika: napadač osveži ukradenim, korisnikov sledeći pokušaj gasi sesiju", async () => {
+    const original = cookieOf(await signIn());
+    const userGot = await refresh(original); // korisnik dobije novi token
+    const attacker = await refresh(original); // napadač sa starim (novi još nije upotrebljen) — dobija token
+    assert.equal(attacker.status, 200);
+    const userNext = await refresh(cookieOf(userGot)); // korisnikov token je povučen → krađa
+    assert.equal(userNext.status, 401);
+    assert.equal(userNext.body.code, "session_reused");
+    assert.equal((await refresh(cookieOf(attacker))).status, 401, "napadačeva sesija je ugašena");
   });
 
   test("apsolutni rok sesije: posle 30 dana nova prijava, bez obzira na aktivnost", async () => {
@@ -214,6 +228,9 @@ describe("POST /api/auth/refresh", () => {
     const evil = await refresh(cookie).set("Origin", "https://zlonamerni.example");
     assert.equal(evil.status, 403);
     assert.equal((await refresh(cookie).set("Origin", allowedOrigins()[0]!)).status, 200, "naš frontend");
+    // Naša aplikacija šalje zaglavlje: radi sa bilo koje adrese (sopstveni domen, preview), tuđ sajt ga ne može poslati
+    const custom = await refresh(cookieOf(await signIn())).set("Origin", "https://dom.medikalija.rs").set("X-Requested-With", "medikalija");
+    assert.equal(custom.status, 200);
   });
 
   test("suspendovan korisnik ne može da produži sesiju", async () => {
@@ -251,11 +268,18 @@ describe("aktivni uređaji", () => {
 });
 
 describe("ograničenje broja zahteva", () => {
-  test("zaboravljena lozinka: posle 5 zahteva sa iste adrese → 429", async () => {
-    for (let i = 0; i < 5; i++) assert.equal((await request(app).post("/api/auth/forgot").send({ identifier: `x${i}@dom.rs` })).status, 200);
-    const limited = await request(app).post("/api/auth/forgot").send({ identifier: "y@dom.rs" });
+  test("zaboravljena lozinka: posle 5 zahteva za isti nalog → 429; drugi nalog sa iste adrese radi", async () => {
+    for (let i = 0; i < 5; i++) assert.equal((await request(app).post("/api/auth/forgot").send({ identifier: "x@dom.rs" })).status, 200);
+    const limited = await request(app).post("/api/auth/forgot").send({ identifier: "x@dom.rs" });
     assert.equal(limited.status, 429);
     assert.ok(Number(limited.headers["retry-after"]) > 0);
+    assert.equal((await request(app).post("/api/auth/forgot").send({ identifier: "kolega@dom.rs" })).status, 200, "ceo dom je iza iste adrese");
+  });
+
+  test("prijava: granica po nalogu, ne po adresi celog doma", async () => {
+    for (let i = 0; i < 20; i++) await login({ identifier: "niko@dom.rs", password: "pogresna-lozinka" });
+    assert.equal((await login({ identifier: "niko@dom.rs", password: "pogresna-lozinka" })).status, 429);
+    assert.equal((await signIn()).status, 200, "kolega sa istog rutera se prijavljuje");
   });
 });
 

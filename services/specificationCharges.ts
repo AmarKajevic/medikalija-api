@@ -385,7 +385,7 @@ export async function addExtraCharge(spec: SpecificationDoc, { label, amount, us
 // vratio na odobrenje ako se stavka obriše.
 export async function addServiceCharge(
   spec: SpecificationDoc,
-  { name, times, unitPrice, createdBy, category = "care" }: { name: string; times: number; unitPrice: number; createdBy: Types.ObjectId; category?: "care" | "physio" }
+  { name, times, unitPrice, createdBy, category = "care" }: { name: string; times: number; unitPrice: number; createdBy: Types.ObjectId; category?: "care" | "physio" | "professional" }
 ) {
   const price = round2(times * Math.max(Number(unitPrice) || 0, 0));
   const { spec: saved, result: itemId } = await mutateSpec(spec, (s) => {
@@ -456,7 +456,7 @@ export async function setSpecItemAmount(specId: Id, itemId: Id, amountInput: unk
   const delta = round2(amount - current);
   const oldUnit = current > 0 ? (Number(item.price) || 0) / current : Number(item.price) || 0;
   // Cena po komadu se menja samo za negu i dodatne troškove (lekovi/artikli/analize imaju cenu iz cenovnika)
-  const priced = item.category === "care" || item.category === "extra" || item.category === "physio";
+  const priced = item.category === "care" || item.category === "extra" || item.category === "physio" || item.category === "professional";
   const newUnit = priced && unitPriceInput !== undefined && unitPriceInput !== null && unitPriceInput !== "" ? round2(unitPriceInput) : null;
   if (newUnit !== null && newUnit < 0) throw httpError(400, "Cena ne može biti negativna.");
   if (delta === 0 && (newUnit === null || newUnit === round2(oldUnit))) return spec;

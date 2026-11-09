@@ -22,16 +22,18 @@ const RateLimit =
 interface Options {
   /** Naziv grupe (deo ključa), npr. "login" */
   name: string;
+  /** Po čemu se broji (podrazumevano IP adresa) */
+  key?: (req: Request) => string;
   windowMs: number;
   max: number;
   message?: string;
 }
 
-export function rateLimit({ name, windowMs, max, message = "Previše pokušaja. Sačekajte malo pa pokušajte ponovo." }: Options) {
+export function rateLimit({ name, key: keyOf, windowMs, max, message = "Previše pokušaja. Sačekajte malo pa pokušajte ponovo." }: Options) {
   return async (req: Request, res: Response, next: NextFunction) => {
     const window = Math.floor(Date.now() / windowMs);
     const resetAt = (window + 1) * windowMs;
-    const key = `${name}:${req.ip ?? "unknown"}:${window}`;
+    const key = `${name}:${keyOf ? keyOf(req) : (req.ip ?? "unknown")}:${window}`;
     try {
       const doc = await RateLimit.findOneAndUpdate(
         { _id: key },
