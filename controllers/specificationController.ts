@@ -18,7 +18,7 @@ import {
   setBillingPeriod,
 } from "../services/getOrCreateActiveSpecification.js";
 import GlobalSetting from "../models/GlobalSetting.js";
-import { nextPeriodAfter, normalizeStoredDay } from "../utils/dateUtils.js";
+import { nextPeriodAfter, normalizeStoredDay, parseCalendarDay } from "../utils/dateUtils.js";
 import { MANAGER_ROLES, addExtraCharge, removeSpecItem, setSpecItemAmount } from "../services/specificationCharges.js";
 import type { Request, Response } from "express";
 import { errorMessage, statusOf } from "../utils/errors.js";
@@ -244,6 +244,13 @@ const saveBillingForSpecification = async (req: Request, res: Response) => {
     const totalRSD = specTotalRSD + debtRSD + lodgingRSD + earlyRSD;
     const totalEUR = specEUR + debtEUR + lodgingEUR + earlyEUR;
 
+    // Datumi vanstandardnog perioda su opcioni, ali ako su uneti moraju imati smisla
+    const earlyStart = includeEarlyLodging ? parseCalendarDay(req.body.earlyLodgingStart) : null;
+    const earlyEnd = includeEarlyLodging ? parseCalendarDay(req.body.earlyLodgingEnd) : null;
+    if (earlyStart && earlyEnd && earlyEnd < earlyStart) {
+      return res.status(400).json({ success: false, message: "Kraj vanstandardnog perioda je pre početka." });
+    }
+
     // Naredni period: dan posle kraja specifikacije + 30 kalendarskih dana
     const { startDate: nextPeriodStart, endDate: nextPeriodEnd } =
       nextPeriodAfter(normalizeStoredDay(spec.endDate) ?? spec.endDate);
@@ -263,6 +270,8 @@ const saveBillingForSpecification = async (req: Request, res: Response) => {
       earlyLodgingRSD: earlyRSD,
       earlyLodgingOption: includeEarlyLodging ? optionLabel(req.body.earlyLodgingOption) : "",
       earlyLodgingNote: includeEarlyLodging && typeof req.body.earlyLodgingNote === "string" ? req.body.earlyLodgingNote.trim().slice(0, 300) : "",
+      earlyLodgingStart: earlyStart ?? undefined,
+      earlyLodgingEnd: earlyEnd ?? undefined,
       specEUR,
       totalRSD,
       totalEUR,

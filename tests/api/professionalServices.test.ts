@@ -76,4 +76,17 @@ describe("napomene za vanstandardni smeštaj", () => {
     const off = await save({ includeEarlyLodging: false, earlyLodgingEUR: 120, earlyLodgingNote: notes[0].text });
     assert.equal(off.body.specification.billing.earlyLodgingNote, "", "isključen smeštaj nema napomenu");
   });
+
+  test("datumi vanstandardnog perioda se čuvaju uz uključen smeštaj; kraj pre početka se odbija", async () => {
+    const patient = await createPatient();
+    const spec = (await as(admin).get(`/api/specification/${patient._id}`)).body.specification;
+    const save = (body: object) => as(admin).post(`/api/specification/${spec._id}/billing`, body);
+    const dated = await save({ includeEarlyLodging: true, earlyLodgingEUR: 50, earlyLodgingStart: "2026-10-01", earlyLodgingEnd: "2026-10-05" });
+    assert.equal(dated.status, 200, dated.body.message);
+    assert.equal(dated.body.specification.billing.earlyLodgingStart.slice(0, 10), "2026-10-01");
+    assert.equal(dated.body.specification.billing.earlyLodgingEnd.slice(0, 10), "2026-10-05");
+    assert.equal((await save({ includeEarlyLodging: true, earlyLodgingEUR: 50, earlyLodgingStart: "2026-10-05", earlyLodgingEnd: "2026-10-01" })).status, 400);
+    const off = await save({ includeEarlyLodging: false, earlyLodgingStart: "2026-10-01", earlyLodgingEnd: "2026-10-05" });
+    assert.equal(off.body.specification.billing.earlyLodgingStart, undefined);
+  });
 });
