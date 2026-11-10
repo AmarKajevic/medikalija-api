@@ -34,6 +34,7 @@ import physioPricesRouter from "./routes/physioPrices.js";
 import professionalServicesRouter from "./routes/professionalServices.js";
 import medicalReportsRouter from "./routes/medicalReports.js"
 import socialNotesRouter from "./routes/socialNotes.js"
+import socialDossierRouter from "./routes/socialDossier.js";
 
 // Express aplikacija bez pokretanja servera — koriste je index.ts i testovi.
 const app = express();
@@ -97,6 +98,7 @@ app.use("/api/physio-prices", physioPricesRouter);
 app.use("/api/professional-services", professionalServicesRouter);
 app.use("/api/medical-reports", medicalReportsRouter);
 app.use("/api/social-notes", socialNotesRouter);
+app.use("/api/social", socialDossierRouter);
 
 // Nepoznata ruta: JSON umesto Express HTML stranice
 app.use("/api", (_req: Request, res: Response) => {
