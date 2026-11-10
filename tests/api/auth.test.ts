@@ -291,7 +291,7 @@ describe("promena sopstvene lozinke", () => {
     const change = (body: object) => request(app).post("/api/auth/password").set("Authorization", `Bearer ${laptopRes.body.accessToken}`).send(body);
 
     assert.equal((await change({ currentPassword: "pogresna", newPassword: "nova-dobra-lozinka" })).status, 400);
-    assert.equal((await change({ currentPassword: PASSWORD, newPassword: "kratka" })).status, 400);
+    assert.equal((await change({ currentPassword: PASSWORD, newPassword: "kr4t" })).status, 400);
     assert.equal((await change({ currentPassword: PASSWORD, newPassword: "sanja12345678" })).status, 400, "ne sme sadržati ime");
     assert.equal((await change({ currentPassword: PASSWORD, newPassword: "nova-dobra-lozinka" })).status, 200);
 

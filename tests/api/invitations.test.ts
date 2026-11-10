@@ -50,7 +50,7 @@ describe("pozivnica", () => {
     assert.equal(info.body.link.username, "sanja.p");
     assert.equal(info.body.link.invitedBy, `${admin.name} ${admin.lastName}`);
 
-    assert.equal((await request(app).post(`/api/auth/link/${token}`).send({ password: "kratka" })).status, 400);
+    assert.equal((await request(app).post(`/api/auth/link/${token}`).send({ password: "kr4t" })).status, 400);
     const accepted = await request(app).post(`/api/auth/link/${token}`).send({ password: "moja-nova-lozinka" });
     assert.equal(accepted.status, 200);
     assert.ok(accepted.body.accessToken);
