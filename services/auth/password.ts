@@ -4,10 +4,11 @@ import { httpError } from "../../utils/errors.js";
 
 const COMMON = new Set([
   "1234567890", "12345678910", "123456789a", "qwertyuiop", "password123", "lozinka123", "sifra12345", "šifra12345",
-  "medikalija", "medikalija1", "medikalija123", "0000000000", "1111111111", "abcdefghij", "qwerty1234", "1q2w3e4r5t",
+  "123456", "1234567", "12345678", "123456789", "654321", "111111", "000000", "qwerty", "qwertz", "abc123", "password",
+  "lozinka", "sifra1", "šifra1", "sifra123", "medikalija", "medikalija1", "medikalija123", "0000000000", "1111111111", "abcdefghij", "qwerty1234", "1q2w3e4r5t",
 ]);
 
-export const PASSWORD_MIN = 10;
+export const PASSWORD_MIN = 6;
 
 export function assertStrongPassword(password: unknown, user: { name?: string; lastName?: string; email?: string | null; username?: string | null }) {
   if (typeof password !== "string") throw httpError(400, "Unesite lozinku.");
