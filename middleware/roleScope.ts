@@ -14,6 +14,8 @@ const SCOPES: Record<string, Rule[]> = {
     ["*", "/api/auth"],
     ["GET", "/api/patient"],
     ["*", "/api/social-notes"],
+    // Socijalni dosije: lični podaci, procene, individualni plan, rokovi
+    ["*", "/api/social"],
     // Samo raspored perioda (datumi), ne i same specifikacije
     ["GET", /^\/api\/specification\/[^/]+\/future-spec-periods$/],
     ["*", "/api/calendar"],
