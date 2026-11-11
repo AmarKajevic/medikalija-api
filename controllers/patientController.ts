@@ -10,9 +10,13 @@ import UsedArticles from "../models/UsedArticles.js";
 import UsedCombinations from "../models/UsedCombinations.js";
 import MedicalReport from "../models/MedicalReport.js";
 import SocialNote from "../models/SocialNote.js";
+import SocialDocument from "../models/SocialDocument.js";
+import SocialProfile from "../models/SocialProfile.js";
 import CalendarEvent from "../models/CalendarEvent.js";
 import PatientMedicine from "../models/PatientMedicine.js";
 import PatientArticle from "../models/PatientArticle.js";
+import MedicineReserve from "../models/medicineReserve.js";
+import AuditLog from "../models/AuditLog.js";
 import { param } from "../utils/http.js";
 
 const getPatients = async (_req: Request, res: Response) => {
@@ -53,8 +57,8 @@ const addPatient = async (req: Request, res: Response) => {
     // Datumi se čuvaju kao kalendarski dan (UTC ponoć) — od dana prijema se
     // računa mreža 30-dnevnih perioda specifikacija.
     const admissionDay = parseCalendarDay(admissionDate);
-    const birthDay = parseCalendarDay(dateOfBirth);
-    if (!admissionDay || !birthDay) {
+    const birthDay = dateOfBirth ? parseCalendarDay(dateOfBirth) : null;
+    if (!admissionDay || (dateOfBirth && !birthDay)) {
       return res.status(400).json({ success: false, message: "Neispravan datum rođenja ili prijema" });
     }
 
@@ -62,7 +66,7 @@ const addPatient = async (req: Request, res: Response) => {
       name,
       lastName,
       dateOfBirth: birthDay,
-      address,
+      address: typeof address === "string" ? address.trim() : "",
       admissionDate: admissionDay,
       contactPerson: contactPerson || "",
       createdBy: req.user._id,
@@ -81,13 +85,18 @@ const updatePatient = async (req: Request, res: Response) => {
     if (!patient) return res.status(404).json({ success: false, message: "Pacijent nije pronađen." });
     const body = req.body ?? {};
 
-    for (const field of ["name", "lastName", "address"] as const) {
+    for (const field of ["name", "lastName"] as const) {
       if (body[field] === undefined) continue;
       const value = typeof body[field] === "string" ? body[field].trim() : "";
-      if (!value) return res.status(400).json({ success: false, message: "Ime, prezime i adresa ne mogu biti prazni." });
+      if (!value) return res.status(400).json({ success: false, message: "Ime i prezime ne mogu biti prazni." });
       patient[field] = value.slice(0, 200);
     }
+    if (body.address !== undefined) patient.address = typeof body.address === "string" ? body.address.trim().slice(0, 200) : "";
     if (body.contactPerson !== undefined) patient.contactPerson = typeof body.contactPerson === "string" ? body.contactPerson.trim().slice(0, 300) : "";
+    if (body.dateOfBirth === null || body.dateOfBirth === "") {
+      patient.set("dateOfBirth", null);
+      delete body.dateOfBirth;
+    }
     for (const field of ["dateOfBirth", "admissionDate"] as const) {
       if (body[field] === undefined) continue;
       const day = parseCalendarDay(body[field]);
@@ -118,6 +127,38 @@ const deletePatient = async (req: Request, res: Response) => {
     if (!patient) return res.status(404).json({ success: false, message: "Pacijent nije pronađen." });
 
     const byPatient = { patient: patient._id };
+
+    // Trajno brisanje (samo admin): korisnik i SVI njegovi podaci. Nepovratno, pa se traži
+    // da se ukuca ime i prezime, a brisanje se upisuje u zapisnik (bez ličnih podataka).
+    if (req.query.permanent === "true") {
+      if (req.user.role !== "admin") return res.status(403).json({ success: false, message: "Trajno brisanje može samo admin." });
+      const typed = typeof req.body?.confirmName === "string" ? req.body.confirmName.trim().toLowerCase().replace(/\s+/g, " ") : "";
+      if (typed !== `${patient.name} ${patient.lastName}`.trim().toLowerCase().replace(/\s+/g, " ")) {
+        return res.status(400).json({ success: false, message: "Za trajno brisanje ukucajte tačno ime i prezime korisnika." });
+      }
+      await Promise.all([
+        Specification.deleteMany({ patientId: patient._id }),
+        NurseEntry.deleteMany(byPatient),
+        Diagnosis.deleteMany(byPatient),
+        UsedMedicine.deleteMany(byPatient),
+        UsedArticles.deleteMany(byPatient),
+        UsedCombinations.deleteMany(byPatient),
+        MedicalReport.deleteMany(byPatient),
+        SocialNote.deleteMany(byPatient),
+        SocialDocument.deleteMany(byPatient),
+        SocialProfile.deleteMany(byPatient),
+        CalendarEvent.deleteMany(byPatient),
+        PatientMedicine.deleteMany(byPatient),
+        PatientArticle.deleteMany(byPatient),
+        MedicineReserve.deleteMany(byPatient),
+        AuditLog.deleteMany(byPatient),
+      ]);
+      await Patient.deleteOne({ _id: patient._id });
+      const initials = `${patient.name.charAt(0)}. ${patient.lastName.charAt(0)}.`;
+      await AuditLog.create({ action: "patient.purge", user: req.user._id, summary: `Trajno obrisan korisnik ${initials} sa svim podacima` });
+      return res.status(200).json({ success: true, message: "Korisnik i svi njegovi podaci su trajno obrisani." });
+    }
+
     const counts = await Promise.all([
       Specification.countDocuments({ patientId: patient._id, "items.0": { $exists: true } }),
       NurseEntry.countDocuments(byPatient),
@@ -127,6 +168,7 @@ const deletePatient = async (req: Request, res: Response) => {
       UsedCombinations.countDocuments(byPatient),
       MedicalReport.countDocuments(byPatient),
       SocialNote.countDocuments(byPatient),
+      SocialDocument.countDocuments(byPatient),
       CalendarEvent.countDocuments(byPatient),
       PatientMedicine.countDocuments(byPatient),
       PatientArticle.countDocuments(byPatient),
@@ -140,6 +182,7 @@ const deletePatient = async (req: Request, res: Response) => {
 
     // Prazni periodi (bez stavki) nastaju sami i brišu se sa pacijentom
     await Specification.deleteMany({ patientId: patient._id });
+    await SocialProfile.deleteMany(byPatient);
     await Patient.deleteOne({ _id: patient._id });
     return res.status(200).json({ success: true, message: "Pacijent je obrisan." });
   } catch (error) {

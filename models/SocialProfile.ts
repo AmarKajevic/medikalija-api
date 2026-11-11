@@ -92,6 +92,9 @@ const socialProfileSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Isti JMBG ne sme biti kod dva korisnika (prazan JMBG je dozvoljen više puta)
+socialProfileSchema.index({ jmbg: 1 }, { unique: true, partialFilterExpression: { jmbg: { $gt: "" } } });
+
 export type SocialProfileAttrs = InferSchemaType<typeof socialProfileSchema>;
 
 export default mongoose.model("SocialProfile", socialProfileSchema);
