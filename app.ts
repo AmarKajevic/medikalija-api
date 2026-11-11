@@ -47,6 +47,8 @@ app.use(helmet());
 // Podešavanja ustanove nose logo (data URL), pa im treba veće ograničenje tela.
 // Parser za tu rutu ide prvi; opšti parser posle toga preskače već pročitano telo.
 app.use("/api/settings", express.json({ limit: "1mb" }));
+// Word šabloni (do 2 MB) stižu kao base64 u JSON-u
+app.use("/api/social/templates", express.json({ limit: "3mb" }));
 app.use(express.json());
 app.use(cookieParser());
 
