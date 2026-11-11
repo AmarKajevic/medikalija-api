@@ -48,6 +48,10 @@ const socialProfileSchema = new mongoose.Schema(
     healthInsuranceNumber: str(30),
     chosenDoctor: str(120),
     municipality: str(120),
+    /** Broj dosijea (npr. SR-2026/087) — kako ga vodi ustanova */
+    dossierNumber: str(40),
+    /** Smeštaj u domu: odeljenje i soba (npr. "Odeljenje B, soba 214") */
+    accommodation: str(120),
 
     // Prihodi i plaćanje smeštaja
     pensionType: { type: String, enum: PENSION_TYPES, default: "" },

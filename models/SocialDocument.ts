@@ -11,14 +11,16 @@ export type DocType = (typeof DOC_TYPES)[number];
 /** Delovi teksta po vrsti dokumenta (ključevi su isti u aplikaciji i u budućim šablonima) */
 export const DOC_SECTIONS: Record<DocType, readonly string[]> = {
   intake: ["request", "userAttitude", "eligibility", "capacity", "priority", "alternatives", "outcome"],
-  assessment: ["health", "selfCare", "mental", "communication", "socialTies", "interests", "strengths", "risks", "needs", "culture", "userView", "conclusion"],
-  reassessment: ["changes", "health", "selfCare", "mental", "socialTies", "risks", "needs", "userView", "conclusion"],
+  assessment: ["socialHistory", "health", "selfCare", "mental", "communication", "socialTies", "interests", "strengths", "risks", "needs", "culture", "userView", "conclusion"],
+  reassessment: ["changes", "socialHistory", "health", "selfCare", "mental", "socialTies", "risks", "needs", "userView", "conclusion"],
   plan: ["summary", "adaptation"],
   plan_review: ["progress", "changes", "conclusion"],
 };
 
 const goalSchema = new mongoose.Schema(
   {
+    /** Oblast (npr. Adaptacija, Socijalni kontakti, Ostvarivanje prava) */
+    area: { type: String, trim: true, default: "", maxlength: 120 },
     goal: { type: String, trim: true, required: true, maxlength: 500 },
     outcome: { type: String, trim: true, default: "", maxlength: 500 },
     activities: { type: String, trim: true, default: "", maxlength: 2000 },
