@@ -66,6 +66,8 @@ const PROFILE_FIELDS: Record<string, Parser> = {
   healthInsuranceNumber: text(30),
   chosenDoctor: text(120),
   municipality: text(120),
+  dossierNumber: text(40),
+  accommodation: text(120),
   pensionType: (v) => oneOf(v ?? "", PENSION_TYPES, "Vrsta penzije"),
   incomeNote: text(300),
   payer: (v) => oneOf(v ?? "", PAYERS, "Ko plaća smeštaj"),
@@ -275,7 +277,7 @@ export const getMergeFields = (_req: Request, res: Response) => res.json({ succe
 export const getMergeData = async (req: Request, res: Response) => {
   try {
     const patient = await patientOr404(param(req, "patientId"));
-    const data = await buildMergeData(String(patient._id));
+    const data = await buildMergeData(String(patient._id), req.user);
     await audit(req, "template.fill", patient._id, [], typeof req.query.template === "string" ? str(req.query.template, 120) : "");
     res.json({ success: true, ...data });
   } catch (err) {
@@ -302,6 +304,7 @@ function parseDocument(type: DocType, b: Record<string, unknown>) {
     .map(obj)
     .filter((g) => str(g.goal, 500))
     .map((g) => ({
+      area: str(g.area, 120),
       goal: str(g.goal, 500),
       outcome: str(g.outcome, 500),
       activities: str(g.activities, 2000),

@@ -220,8 +220,23 @@ describe("Word šabloni", () => {
 
   test("katalog polja i podaci korisnika: uneto jednom, popunjava se svuda", async () => {
     await as(social).patch(profileUrl(), {
-      profile: { jmbg: PETAR_JMBG, legalCapacity: "partial", guardian: { name: "Marko Petrović", phone: "064 2" }, contacts: [{ name: "Marko Petrović", relation: "sin", phone: "064 2" }] },
+      profile: {
+        jmbg: PETAR_JMBG,
+        legalCapacity: "partial",
+        guardian: { name: "Marko Petrović", phone: "064 2" },
+        contacts: [{ name: "Marko Petrović", relation: "sin", phone: "064 2" }],
+        dossierNumber: "SR-2026/087",
+        accommodation: "Odeljenje B, soba 214",
+        placementBasis: "contract",
+        contractNumber: "112/2026",
+        birthPlace: "Kraljevo",
+      },
     });
+    await SocialNote.create({ patient: patient._id, author: social._id, date: new Date("2026-03-14T12:00:00Z"), title: "Prijem", text: "Prijem korisnika u pratnji sina." });
+    const assessment = (await as(social).post("/api/social/documents", { patientId: String(patient._id), type: "assessment", date: "2026-03-20", sections: { socialHistory: "Rođen u Kraljevu.", conclusion: "Dobro adaptiran." } })).body.document;
+    await as(social).post(`/api/social/documents/${assessment._id}/finalize`);
+    const plan = (await as(social).post("/api/social/documents", { patientId: String(patient._id), type: "plan", date: "2026-03-25", goals: [{ area: "Adaptacija", goal: "Oseća se sigurno" }], nextReview: "2026-09-25" })).body.document;
+    await as(social).post(`/api/social/documents/${plan._id}/finalize`);
     const fields = (await as(social).get("/api/social/merge-fields")).body;
     assert.ok(fields.fields.some((f: { key: string }) => f.key === "jmbg"));
     assert.ok(fields.lists.some((l: { key: string }) => l.key === "kontakti"));
@@ -232,7 +247,18 @@ describe("Word šabloni", () => {
     assert.equal(data.fields.datum_rodjenja, "01.01.1940.");
     assert.equal(data.fields.staratelj, "Marko Petrović");
     assert.equal(data.fields.poslovna_sposobnost, "delimično lišen poslovne sposobnosti");
-    assert.deepEqual(data.lists.kontakti[0], { kontakt_ime: "Marko Petrović", kontakt_srodstvo: "sin", kontakt_telefon: "064 2", kontakt_email: "", kontakt_adresa: "" });
+    assert.deepEqual(data.lists.kontakti[0], { kontakt_ime: "Marko Petrović", kontakt_srodstvo: "sin", kontakt_telefon: "064 2", kontakt_email: "", kontakt_adresa: "", kontakt_napomena: "" });
+    assert.equal(data.fields.broj_dosijea, "SR-2026/087");
+    await as(social).patch(profileUrl(), { profile: { maritalStatus: "widowed" } });
+    assert.equal((await as(social).get(`/api/social/merge-data/${patient._id}`)).body.fields.bracni_status, "udovac", "oblik po polu iz JMBG-a");
+    assert.equal(data.fields.smestaj, "Odeljenje B, soba 214");
+    assert.equal(data.fields.datum_i_mesto_rodjenja, "01.01.1940., Kraljevo");
+    assert.equal(data.fields.osnov_smestaja_opis, "Ugovor o smeštaju br. 112/2026");
+    assert.equal(data.fields.anamneza, "Rođen u Kraljevu.");
+    assert.equal(data.fields.zakljucak, "Dobro adaptiran.");
+    assert.equal(data.fields.socijalni_radnik, `${social.name} ${social.lastName}`, "ko pravi dokument");
+    assert.deepEqual(data.lists.ciljevi[0], { rb: "1", oblast: "Adaptacija", cilj: "Oseća se sigurno", ishod: "", aktivnosti: "", odgovorni: "", rok: "" });
+    assert.deepEqual(data.lists.beleske, [{ beleska_datum: "14.03.2026.", beleska_naslov: "Prijem", beleska: "Prijem korisnika u pratnji sina." }]);
     // Svaka katalogizovana vrednost postoji u podacima (nema polja bez izvora)
     for (const f of fields.fields as Array<{ key: string }>) assert.ok(f.key in data.fields, f.key);
   });
