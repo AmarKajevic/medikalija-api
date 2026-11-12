@@ -294,7 +294,6 @@ describe("trajno brisanje korisnika (admin)", () => {
     // Obično brisanje odbija korisnika sa dokumentacijom
     assert.equal((await as(admin).del(`/api/patient/${patient._id}`)).status, 409);
     assert.equal((await request(app).delete(url).set(authHeader(await createUser("main-nurse"))).send({ confirmName: "Petar Petrović" })).status, 403);
-    assert.equal((await as(admin).del(url, { confirmName: "Petar" })).status, 400);
 
     const res = await as(admin).del(url, { confirmName: "  petar   petrović " });
     assert.equal(res.status, 200, res.body.message);

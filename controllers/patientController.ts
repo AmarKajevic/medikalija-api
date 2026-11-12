@@ -241,14 +241,10 @@ const deletePatient = async (req: Request, res: Response) => {
 
     const byPatient = { patient: patient._id };
 
-    // Trajno brisanje (admin i socijalni radnik): korisnik i SVI njegovi podaci. Nepovratno, pa se traži
-    // da se ukuca ime i prezime, a brisanje se upisuje u zapisnik (bez ličnih podataka).
+    // Trajno brisanje (admin i socijalni radnik): korisnik i SVI njegovi podaci. Nepovratno — potvrda je u aplikaciji,
+    // a brisanje se upisuje u zapisnik (bez ličnih podataka).
     if (req.query.permanent === "true") {
       if (!PATIENT_PURGE_ROLES.includes(req.user.role)) return res.status(403).json({ success: false, message: "Trajno brisanje može samo admin ili socijalni radnik." });
-      const typed = typeof req.body?.confirmName === "string" ? req.body.confirmName.trim().toLowerCase().replace(/\s+/g, " ") : "";
-      if (typed !== `${patient.name} ${patient.lastName}`.trim().toLowerCase().replace(/\s+/g, " ")) {
-        return res.status(400).json({ success: false, message: "Za trajno brisanje ukucajte tačno ime i prezime korisnika." });
-      }
       await Promise.all([
         Specification.deleteMany({ patientId: patient._id }),
         NurseEntry.deleteMany(byPatient),

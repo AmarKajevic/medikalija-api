@@ -152,12 +152,11 @@ describe("socijalni radnik", () => {
     assert.equal((await s.del(`/api/patient/${patient._id}`)).status, 200);
     assert.equal(await Patient.countDocuments(), 0);
 
-    // Trajno brisanje sa svim podacima, kao admin (uz ukucano ime); glavna sestra ne može
+    // Trajno brisanje sa svim podacima, kao admin (bez kucanja imena); glavna sestra ne može
     const withData = await createPatient({ name: "Mara", lastName: "Marić" });
     await Specification.create({ patientId: withData._id, startDate: new Date(), endDate: new Date(), items: [{ name: "Lek", price: 1, amount: 1 }] });
     const purge = (u: UserDoc, confirmName: string) => request(app).delete(`/api/patient/${withData._id}?permanent=true`).set(authHeader(u)).send({ confirmName });
     assert.equal((await purge(mainNurse, "Mara Marić")).status, 403);
-    assert.equal((await purge(social, "Pogrešno ime")).status, 400);
     assert.equal((await purge(social, "Mara Marić")).status, 200);
     assert.equal(await Specification.countDocuments({ patientId: withData._id }), 0);
     assert.equal((await as(nurse).del(`/api/patient/${(await createPatient())._id}`)).status, 403);
