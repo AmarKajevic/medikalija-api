@@ -18,6 +18,7 @@ import PatientArticle from "../models/PatientArticle.js";
 import MedicineReserve from "../models/medicineReserve.js";
 import AuditLog from "../models/AuditLog.js";
 import { param } from "../utils/http.js";
+import { PATIENT_EDIT_ROLES, PATIENT_PURGE_ROLES } from "../middleware/requireRole.js";
 import { assertUniquePatientName, patientNameKey } from "../services/patientIdentity.js";
 
 // Koliko zapisa (dokumentacije) pacijent ima: specifikacije sa stavkama, unosi, izveštaji, beleške, zalihe.
@@ -87,10 +88,10 @@ async function planDuplicates(): Promise<DuplicatePlan> {
   };
 }
 
-// GET /api/patient/duplicates — pregled pre brisanja (samo admin)
+// GET /api/patient/duplicates — pregled pre brisanja (admin, glavna sestra, socijalni radnik)
 const getDuplicatePatients = async (req: Request, res: Response) => {
   try {
-    if (req.user.role !== "admin") return res.status(403).json({ success: false, message: "Duplikate može da briše samo admin." });
+    if (!PATIENT_EDIT_ROLES.includes(req.user.role)) return res.status(403).json({ success: false, message: "Nemate dozvolu da brišete duplikate." });
     return res.json({ success: true, ...(await planDuplicates()) });
   } catch (error) {
     return res.status(statusOf(error)).json({ success: false, message: errorMessage(error) });
@@ -100,7 +101,7 @@ const getDuplicatePatients = async (req: Request, res: Response) => {
 // POST /api/patient/duplicates/remove — briše duplikate bez dokumentacije (plan se računa ponovo na serveru)
 const removeDuplicatePatients = async (req: Request, res: Response) => {
   try {
-    if (req.user.role !== "admin") return res.status(403).json({ success: false, message: "Duplikate može da briše samo admin." });
+    if (!PATIENT_EDIT_ROLES.includes(req.user.role)) return res.status(403).json({ success: false, message: "Nemate dozvolu da brišete duplikate." });
     const plan = await planDuplicates();
     const ids = plan.groups.flatMap((g) => g.remove);
     if (ids.length > 0) {
@@ -231,7 +232,7 @@ const updatePatient = async (req: Request, res: Response) => {
 // i finansijska dokumentacija se čuva i ne sme ostati bez pacijenta.
 const deletePatient = async (req: Request, res: Response) => {
   try {
-    if (req.user.role !== "admin" && req.user.role !== "main-nurse") {
+    if (!PATIENT_EDIT_ROLES.includes(req.user.role)) {
       return res.status(403).json({ success: false, message: "Nemate dozvolu da obrišete pacijenta" });
     }
     const id = param(req, "id");
@@ -240,10 +241,10 @@ const deletePatient = async (req: Request, res: Response) => {
 
     const byPatient = { patient: patient._id };
 
-    // Trajno brisanje (samo admin): korisnik i SVI njegovi podaci. Nepovratno, pa se traži
+    // Trajno brisanje (admin i socijalni radnik): korisnik i SVI njegovi podaci. Nepovratno, pa se traži
     // da se ukuca ime i prezime, a brisanje se upisuje u zapisnik (bez ličnih podataka).
     if (req.query.permanent === "true") {
-      if (req.user.role !== "admin") return res.status(403).json({ success: false, message: "Trajno brisanje može samo admin." });
+      if (!PATIENT_PURGE_ROLES.includes(req.user.role)) return res.status(403).json({ success: false, message: "Trajno brisanje može samo admin ili socijalni radnik." });
       const typed = typeof req.body?.confirmName === "string" ? req.body.confirmName.trim().toLowerCase().replace(/\s+/g, " ") : "";
       if (typed !== `${patient.name} ${patient.lastName}`.trim().toLowerCase().replace(/\s+/g, " ")) {
         return res.status(400).json({ success: false, message: "Za trajno brisanje ukucajte tačno ime i prezime korisnika." });

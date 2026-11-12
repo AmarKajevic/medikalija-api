@@ -3,6 +3,10 @@ import type { Role } from "../models/User.js";
 
 // Dozvoljava pristup samo navedenim ulogama. Koristi se posle authMiddleware.
 export const MANAGER_ROLES: readonly Role[] = ["admin", "main-nurse"];
+/** Ko sme da ispravlja podatke korisnika i briše greškom/dvaput unete korisnike */
+export const PATIENT_EDIT_ROLES: readonly Role[] = ["admin", "main-nurse", "social-worker"];
+/** Ko sme da trajno obriše korisnika sa svim podacima (uz ukucano ime i prezime) */
+export const PATIENT_PURGE_ROLES: readonly Role[] = ["admin", "social-worker"];
 /** Sve uloge sa prijavom */
 export const STAFF_ROLES: readonly Role[] = ["admin", "main-nurse", "nurse", "doctor", "social-worker", "physiotherapist"];
 /** Zdravstveno osoblje: vidi medicinske podatke (svi osim socijalnog radnika) */

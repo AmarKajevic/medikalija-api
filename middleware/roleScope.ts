@@ -13,6 +13,9 @@ const SCOPES: Record<string, Rule[]> = {
   "social-worker": [
     ["*", "/api/auth"],
     ["GET", "/api/patient"],
+    // Ispravka podataka i brisanje korisnika (bez dokumentacije), brisanje duplikata
+    [["PUT", "DELETE"], /^\/api\/patient\/[^/]+$/],
+    ["POST", "/api/patient/duplicates/remove"],
     ["*", "/api/social-notes"],
     // Socijalni dosije: lični podaci, procene, individualni plan, rokovi
     ["*", "/api/social"],
