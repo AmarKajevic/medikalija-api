@@ -162,3 +162,16 @@ describe("socijalni radnik", () => {
     assert.equal((await as(nurse).del(`/api/patient/${(await createPatient())._id}`)).status, 403);
   });
 });
+
+describe("otpust", () => {
+  test("socijalni radnik otpušta korisnika; sestra ne može", async () => {
+    const social = await createUser("social-worker");
+    const patient = await createPatient();
+    const url = `/api/patient/${patient._id}/discharge`;
+    const today = new Date().toISOString().slice(0, 10);
+    assert.equal((await as(nurse).patch(url, { dischargeDate: today })).status, 403);
+    const res = await as(social).patch(url, { dischargeDate: today });
+    assert.equal(res.status, 200, res.body.message);
+    assert.ok((await Patient.findById(patient._id))?.dischargeDate);
+  });
+});
