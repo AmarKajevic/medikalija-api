@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { assertUniquePatientName, patientNameKey } from "../services/patientIdentity.js";
 import mongoose from "mongoose";
 import Patient from "../models/Patient.js";
 import User from "../models/User.js";
@@ -171,6 +172,11 @@ async function applyChanges(req: Request, patient: InstanceType<typeof Patient>,
   }
 
   if (Object.keys(patientPatch).length) {
+    const nextName = String(patientPatch.name ?? patient.name);
+    const nextLast = String(patientPatch.lastName ?? patient.lastName);
+    if (patientNameKey(nextName, nextLast) !== patientNameKey(patient.name, patient.lastName)) {
+      await assertUniquePatientName(String(patientPatch.name ?? patient.name), String(patientPatch.lastName ?? patient.lastName), patient._id);
+    }
     patient.set(patientPatch);
     await patient.save();
   }
@@ -229,6 +235,7 @@ export const createResident = async (req: Request, res: Response) => {
     if (!name || !lastName) throw httpError(400, "Unesite ime i prezime.");
     const admissionDate = day(p.admissionDate, "Datum prijema");
     if (!admissionDate) throw httpError(400, "Unesite datum prijema.");
+    await assertUniquePatientName(name, lastName);
     created = await Patient.create({ name, lastName, admissionDate, createdBy: req.user._id });
     await applyChanges(req, created, { patient: { ...p, name, lastName }, profile: req.body?.profile });
     await audit(req, "patient.create", created._id);

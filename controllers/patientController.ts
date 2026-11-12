@@ -18,6 +18,7 @@ import PatientArticle from "../models/PatientArticle.js";
 import MedicineReserve from "../models/medicineReserve.js";
 import AuditLog from "../models/AuditLog.js";
 import { param } from "../utils/http.js";
+import { assertUniquePatientName, patientNameKey } from "../services/patientIdentity.js";
 
 // Koliko zapisa (dokumentacije) pacijent ima: specifikacije sa stavkama, unosi, izveštaji, beleške, zalihe.
 // Pacijent bez dokumentacije (npr. greškom ili dvaput unet) sme da se obriše.
@@ -40,9 +41,8 @@ async function documentationCount(patientId: unknown) {
   return counts.reduce((a, b) => a + b, 0);
 }
 
-// Ime i prezime za poređenje: bez razlike u velikim slovima i razmacima
-const nameKey = (p: { name?: string | null; lastName?: string | null }) =>
-  `${p.name ?? ""} ${p.lastName ?? ""}`.trim().toLowerCase().replace(/\s+/g, " ");
+// Ime i prezime za poređenje: ćirilica = latinica, bez razlike u kvačicama, slovima i razmacima
+const nameKey = (p: { name?: string | null; lastName?: string | null }) => patientNameKey(p.name, p.lastName);
 
 type DuplicatePlan = {
   groups: Array<{
@@ -166,9 +166,14 @@ const addPatient = async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, message: "Neispravan datum rođenja ili prijema" });
     }
 
+    if (typeof name !== "string" || !name.trim() || typeof lastName !== "string" || !lastName.trim()) {
+      return res.status(400).json({ success: false, message: "Unesite ime i prezime." });
+    }
+    await assertUniquePatientName(name, lastName);
+
     const patient = await Patient.create({
-      name,
-      lastName,
+      name: name.trim(),
+      lastName: lastName.trim(),
       dateOfBirth: birthDay,
       address: typeof address === "string" ? address.trim() : "",
       admissionDate: admissionDay,
@@ -178,7 +183,7 @@ const addPatient = async (req: Request, res: Response) => {
 
     res.status(201).json({ success: true, patient });
   } catch (err) {
-    res.status(500).json({ success: false, error: errorMessage(err) });
+    res.status(statusOf(err)).json({ success: false, message: errorMessage(err), error: errorMessage(err) });
   }
 }
 // Ispravka podataka pacijenta (pogrešno uneto ime, datum, adresa, kontakt). Šalju se
@@ -188,6 +193,7 @@ const updatePatient = async (req: Request, res: Response) => {
     const patient = await Patient.findById(param(req, "id"));
     if (!patient) return res.status(404).json({ success: false, message: "Pacijent nije pronađen." });
     const body = req.body ?? {};
+    const keyBefore = patientNameKey(patient.name, patient.lastName);
 
     for (const field of ["name", "lastName"] as const) {
       if (body[field] === undefined) continue;
@@ -195,6 +201,8 @@ const updatePatient = async (req: Request, res: Response) => {
       if (!value) return res.status(400).json({ success: false, message: "Ime i prezime ne mogu biti prazni." });
       patient[field] = value.slice(0, 200);
     }
+    // Preimenovanje u ime koje već ima drugi korisnik nije dozvoljeno
+    if (patientNameKey(patient.name, patient.lastName) !== keyBefore) await assertUniquePatientName(patient.name, patient.lastName, patient._id);
     if (body.address !== undefined) patient.address = typeof body.address === "string" ? body.address.trim().slice(0, 200) : "";
     if (body.contactPerson !== undefined) patient.contactPerson = typeof body.contactPerson === "string" ? body.contactPerson.trim().slice(0, 300) : "";
     if (body.dateOfBirth === null || body.dateOfBirth === "") {
@@ -214,7 +222,7 @@ const updatePatient = async (req: Request, res: Response) => {
     await patient.save();
     return res.json({ success: true, message: "Podaci pacijenta su izmenjeni.", patient });
   } catch (err) {
-    return res.status(500).json({ success: false, message: errorMessage(err) });
+    return res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
   }
 };
 

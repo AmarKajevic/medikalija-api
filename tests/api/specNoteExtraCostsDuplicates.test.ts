@@ -5,6 +5,7 @@ import request from "supertest";
 import app from "../../app.js";
 import Patient from "../../models/Patient.js";
 import Specification from "../../models/Specification.js";
+import { patientNameKey } from "../../services/patientIdentity.js";
 import { authHeader, createPatient, createUser, useTestDatabase, type UserDoc } from "../helpers/setup.js";
 
 useTestDatabase();
@@ -96,5 +97,41 @@ describe("duplikati pacijenata", () => {
     assert.equal(res.body.removed, 0);
     assert.equal(res.body.skipped, 1);
     assert.equal(await Patient.countDocuments(), 2);
+  });
+});
+
+describe("isto ime u ćirilici i latinici", () => {
+  test("ključ imena ne zavisi od pisma, kvačica i velikih slova", () => {
+    const k = patientNameKey("Đorđe", "Petrović");
+    assert.equal(patientNameKey("Ђорђе", "Петровић"), k);
+    assert.equal(patientNameKey("DJORDJE", "petrovic"), k);
+    assert.equal(patientNameKey(" Љиљана ", "Њего"), patientNameKey("Ljiljana", "Njego"));
+    assert.notEqual(patientNameKey("Marko", "Petrović"), k);
+  });
+
+  test("duplikat u ćirilici se briše, ostaje latinični sa podacima", async () => {
+    const lat = await createPatient({ name: "Milica", lastName: "Jovanović" });
+    const cyr = await createPatient({ name: "Милица", lastName: "Јовановић" });
+    await Specification.create({ patientId: lat._id, startDate: new Date(), endDate: new Date(), items: [{ name: "Lek", price: 1, amount: 1 }] });
+    const res = await as(admin).post("/api/patient/duplicates/remove");
+    assert.equal(res.body.removed, 1);
+    assert.equal(await Patient.countDocuments({ _id: cyr._id }), 0);
+    assert.equal(await Patient.countDocuments({ _id: lat._id }), 1);
+  });
+
+  test("ne može se dodati korisnik sa istim imenom i prezimenom (ni u drugom pismu)", async () => {
+    const existing = await createPatient({ name: "Milica", lastName: "Jovanović" });
+    const body = { lastName: "Јовановић", name: "Милица", admissionDate: "2026-10-01" };
+    const blocked = await as(admin).post("/api/patient/addPatient", body);
+    assert.equal(blocked.status, 409);
+    assert.match(blocked.body.message, /već postoji/);
+    const social = await as(admin).post("/api/social/residents", { patient: { name: "MILICA", lastName: "Jovanovic", admissionDate: "2026-10-01" } });
+    assert.equal(social.status, 409);
+    assert.equal(await Patient.countDocuments(), 1);
+
+    // Preimenovanje u postojeće ime nije dozvoljeno; izmena ostalih podataka jeste
+    const other = await createPatient({ name: "Ana", lastName: "Anić" });
+    assert.equal((await as(admin).put(`/api/patient/${other._id}`, { name: "Milica", lastName: "Jovanović" })).status, 409);
+    assert.equal((await as(admin).put(`/api/patient/${existing._id}`, { name: "Milica", lastName: "Jovanović", address: "Novi Sad" })).status, 200);
   });
 });
