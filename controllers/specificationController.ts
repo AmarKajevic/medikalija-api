@@ -210,6 +210,19 @@ const addCostsToSpecification = async (req: Request, res: Response) => {
 // controllers/specificationController.js (nastavak)
 
 
+// PATCH /api/specification/:id/note { note } — napomena koja se štampa ispod tabela specifikacije
+const saveSpecificationNote = async (req: Request, res: Response) => {
+  try {
+    const note = typeof req.body?.note === "string" ? req.body.note.trim() : "";
+    if (note.length > 2000) return res.status(400).json({ success: false, message: "Napomena je predugačka (najviše 2000 znakova)." });
+    const spec = await Specification.findByIdAndUpdate(param(req, "id"), { $set: { note } }, { new: true });
+    if (!spec) return res.status(404).json({ success: false, message: "Specifikacija nije pronađena." });
+    return res.json({ success: true, specification: spec, message: note ? "Napomena je sačuvana." : "Napomena je uklonjena." });
+  } catch (err) {
+    return res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
+  }
+};
+
 // Naziv izabrane cene smeštaja (npr. "30 dana") za prikaz i štampu
 const optionLabel = (v: unknown) => (typeof v === "string" ? v.trim().slice(0, 80) : "");
 
@@ -444,4 +457,4 @@ const getFutureSpecificationPeriods = async (req: Request, res: Response) => {
   }
 };
 
-export {chooseBillingPeriod, getNonStandardPeriods, openNonStandard, updateSpecificationItemAmount, getSpecification, getBillingPeriod, getPastPeriods, getSelectablePeriods, openPeriod, changeDates, activatePeriod, activateNextPeriod, activateExisting, getFutureSpecificationPeriods, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}
+export {saveSpecificationNote, chooseBillingPeriod, getNonStandardPeriods, openNonStandard, updateSpecificationItemAmount, getSpecification, getBillingPeriod, getPastPeriods, getSelectablePeriods, openPeriod, changeDates, activatePeriod, activateNextPeriod, activateExisting, getFutureSpecificationPeriods, getSpecificationHistory, getSpecificationById, addCostsToSpecification, saveBillingForSpecification, deleteSpecificationItem, calculatePreview}

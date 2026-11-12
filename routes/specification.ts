@@ -1,7 +1,7 @@
 import express from "express"
 import authMiddleware from "../middleware/authMiddleware.js"
 import { requireManager } from "../middleware/requireRole.js"
-import { chooseBillingPeriod, getNonStandardPeriods, openNonStandard, updateSpecificationItemAmount, getBillingPeriod, getPastPeriods, getSelectablePeriods, openPeriod, changeDates, activatePeriod, activateNextPeriod, activateExisting, addCostsToSpecification, calculatePreview, deleteSpecificationItem, getFutureSpecificationPeriods, getSpecification, getSpecificationById, getSpecificationHistory, saveBillingForSpecification } from "../controllers/specificationController.js"
+import { saveSpecificationNote, chooseBillingPeriod, getNonStandardPeriods, openNonStandard, updateSpecificationItemAmount, getBillingPeriod, getPastPeriods, getSelectablePeriods, openPeriod, changeDates, activatePeriod, activateNextPeriod, activateExisting, addCostsToSpecification, calculatePreview, deleteSpecificationItem, getFutureSpecificationPeriods, getSpecification, getSpecificationById, getSpecificationHistory, saveBillingForSpecification } from "../controllers/specificationController.js"
 
 const router = express.Router()
 
@@ -25,6 +25,7 @@ router.get("/history/:patientId", authMiddleware, getSpecificationHistory)
 router.get("/view/:id", authMiddleware, getSpecificationById)
 router.get("/:patientId/future-spec-periods", authMiddleware, getFutureSpecificationPeriods);
 router.post("/:id/billing", authMiddleware, requireManager, saveBillingForSpecification);
+router.patch("/:id/note", authMiddleware, requireManager, saveSpecificationNote);
 router.post("/:id/add-costs", authMiddleware, addCostsToSpecification);
 router.post("/calculate-preview", authMiddleware, calculatePreview)
 router.patch("/:specId/item/:itemId", authMiddleware, requireManager, updateSpecificationItemAmount);

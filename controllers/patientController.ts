@@ -19,6 +19,110 @@ import MedicineReserve from "../models/medicineReserve.js";
 import AuditLog from "../models/AuditLog.js";
 import { param } from "../utils/http.js";
 
+// Koliko zapisa (dokumentacije) pacijent ima: specifikacije sa stavkama, unosi, izveštaji, beleške, zalihe.
+// Pacijent bez dokumentacije (npr. greškom ili dvaput unet) sme da se obriše.
+async function documentationCount(patientId: unknown) {
+  const byPatient = { patient: patientId };
+  const counts = await Promise.all([
+    Specification.countDocuments({ patientId, "items.0": { $exists: true } }),
+    NurseEntry.countDocuments(byPatient),
+    Diagnosis.countDocuments(byPatient),
+    UsedMedicine.countDocuments(byPatient),
+    UsedArticles.countDocuments(byPatient),
+    UsedCombinations.countDocuments(byPatient),
+    MedicalReport.countDocuments(byPatient),
+    SocialNote.countDocuments(byPatient),
+    SocialDocument.countDocuments(byPatient),
+    CalendarEvent.countDocuments(byPatient),
+    PatientMedicine.countDocuments(byPatient),
+    PatientArticle.countDocuments(byPatient),
+  ]);
+  return counts.reduce((a, b) => a + b, 0);
+}
+
+// Ime i prezime za poređenje: bez razlike u velikim slovima i razmacima
+const nameKey = (p: { name?: string | null; lastName?: string | null }) =>
+  `${p.name ?? ""} ${p.lastName ?? ""}`.trim().toLowerCase().replace(/\s+/g, " ");
+
+type DuplicatePlan = {
+  groups: Array<{
+    name: string;
+    keep: { _id: string; documents: number };
+    remove: string[];
+    /** Duplikati koji imaju dokumentaciju — ne brišu se automatski */
+    skipped: Array<{ _id: string; documents: number }>;
+  }>;
+  removeCount: number;
+  skippedCount: number;
+};
+
+// Pacijenti sa istim imenom i prezimenom. U svakoj grupi ostaje onaj sa najviše dokumentacije
+// (pa najstariji); brišu se samo duplikati BEZ dokumentacije — ništa medicinsko ni finansijsko se ne gubi.
+async function planDuplicates(): Promise<DuplicatePlan> {
+  const patients = await Patient.find({}, { name: 1, lastName: 1, createdAt: 1 }).sort({ createdAt: 1, _id: 1 }).lean();
+  const byName = new Map<string, typeof patients>();
+  for (const p of patients) {
+    const key = nameKey(p);
+    if (!key) continue;
+    byName.set(key, [...(byName.get(key) ?? []), p]);
+  }
+  const groups: DuplicatePlan["groups"] = [];
+  for (const list of byName.values()) {
+    if (list.length < 2) continue;
+    const ranked = await Promise.all(list.map(async (p, order) => ({ p, order, documents: await documentationCount(p._id) })));
+    ranked.sort((a, b) => b.documents - a.documents || a.order - b.order);
+    const [keep, ...rest] = ranked;
+    groups.push({
+      name: `${keep!.p.name} ${keep!.p.lastName}`.trim(),
+      keep: { _id: String(keep!.p._id), documents: keep!.documents },
+      remove: rest.filter((r) => r.documents === 0).map((r) => String(r.p._id)),
+      skipped: rest.filter((r) => r.documents > 0).map((r) => ({ _id: String(r.p._id), documents: r.documents })),
+    });
+  }
+  groups.sort((a, b) => a.name.localeCompare(b.name, "sr"));
+  return {
+    groups,
+    removeCount: groups.reduce((n, g) => n + g.remove.length, 0),
+    skippedCount: groups.reduce((n, g) => n + g.skipped.length, 0),
+  };
+}
+
+// GET /api/patient/duplicates — pregled pre brisanja (samo admin)
+const getDuplicatePatients = async (req: Request, res: Response) => {
+  try {
+    if (req.user.role !== "admin") return res.status(403).json({ success: false, message: "Duplikate može da briše samo admin." });
+    return res.json({ success: true, ...(await planDuplicates()) });
+  } catch (error) {
+    return res.status(statusOf(error)).json({ success: false, message: errorMessage(error) });
+  }
+};
+
+// POST /api/patient/duplicates/remove — briše duplikate bez dokumentacije (plan se računa ponovo na serveru)
+const removeDuplicatePatients = async (req: Request, res: Response) => {
+  try {
+    if (req.user.role !== "admin") return res.status(403).json({ success: false, message: "Duplikate može da briše samo admin." });
+    const plan = await planDuplicates();
+    const ids = plan.groups.flatMap((g) => g.remove);
+    if (ids.length > 0) {
+      // Prazni periodi (bez stavki) i prazni socijalni profili nastaju sami i brišu se sa pacijentom
+      await Specification.deleteMany({ patientId: { $in: ids } });
+      await SocialProfile.deleteMany({ patient: { $in: ids } });
+      await Patient.deleteMany({ _id: { $in: ids } });
+      await AuditLog.create({ action: "patient.dedupe", user: req.user._id, summary: `Obrisano ${ids.length} duplikata pacijenata (bez dokumentacije)` });
+    }
+    const message =
+      ids.length === 0 ? "Nema duplikata za brisanje." : `Obrisano duplikata: ${ids.length}.`;
+    return res.json({
+      success: true,
+      removed: ids.length,
+      skipped: plan.skippedCount,
+      message: plan.skippedCount > 0 ? `${message} ${plan.skippedCount} duplikata ima dokumentaciju i nije obrisano.` : message,
+    });
+  } catch (error) {
+    return res.status(statusOf(error)).json({ success: false, message: errorMessage(error) });
+  }
+};
+
 const getPatients = async (_req: Request, res: Response) => {
     try{
         // Poslednji dodati prvi (_id kao rezerva za stare zapise bez createdAt)
@@ -159,21 +263,8 @@ const deletePatient = async (req: Request, res: Response) => {
       return res.status(200).json({ success: true, message: "Korisnik i svi njegovi podaci su trajno obrisani." });
     }
 
-    const counts = await Promise.all([
-      Specification.countDocuments({ patientId: patient._id, "items.0": { $exists: true } }),
-      NurseEntry.countDocuments(byPatient),
-      Diagnosis.countDocuments(byPatient),
-      UsedMedicine.countDocuments(byPatient),
-      UsedArticles.countDocuments(byPatient),
-      UsedCombinations.countDocuments(byPatient),
-      MedicalReport.countDocuments(byPatient),
-      SocialNote.countDocuments(byPatient),
-      SocialDocument.countDocuments(byPatient),
-      CalendarEvent.countDocuments(byPatient),
-      PatientMedicine.countDocuments(byPatient),
-      PatientArticle.countDocuments(byPatient),
-    ]);
-    if (counts.some((n) => n > 0)) {
+    const documents = await documentationCount(patient._id);
+    if (documents > 0) {
       return res.status(409).json({
         success: false,
         message: "Pacijent ima dokumentaciju (specifikacije, unose, izveštaje ili zalihe) i ne može se obrisati. Otpustite ga — podaci ostaju sačuvani.",
@@ -244,4 +335,4 @@ const dischargePatient = async (req: Request, res: Response) => {
 
 
 
-export {getPatients,addPatient, getPatient, updatePatient, deletePatient, dischargePatient}
+export {getDuplicatePatients, removeDuplicatePatients, getPatients,addPatient, getPatient, updatePatient, deletePatient, dischargePatient}
