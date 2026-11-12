@@ -16,6 +16,8 @@ const SCOPES: Record<string, Rule[]> = {
     // Ispravka podataka i brisanje korisnika (bez dokumentacije), brisanje duplikata
     [["PUT", "DELETE"], /^\/api\/patient\/[^/]+$/],
     ["POST", "/api/patient/duplicates/remove"],
+    // Otpust korisnika (zatvara aktivnu specifikaciju, kao kod uprave)
+    ["PATCH", /^\/api\/patient\/[^/]+\/discharge$/],
     ["*", "/api/social-notes"],
     // Socijalni dosije: lični podaci, procene, individualni plan, rokovi
     ["*", "/api/social"],
