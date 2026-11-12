@@ -71,7 +71,7 @@ describe("duplikati pacijenata", () => {
     await Specification.create({ patientId: withData._id, startDate: new Date(), endDate: new Date(), items: [{ name: "Lek", price: 100, amount: 1 }] });
     await Specification.create({ patientId: emptyDup._id, startDate: new Date(), endDate: new Date(), items: [] });
 
-    assert.equal((await as(mainNurse).get("/api/patient/duplicates")).status, 403);
+    assert.equal((await as(nurse).get("/api/patient/duplicates")).status, 403);
     const plan = (await as(admin).get("/api/patient/duplicates")).body;
     assert.equal(plan.removeCount, 3);
     assert.equal(plan.groups.length, 2);
@@ -133,5 +133,33 @@ describe("isto ime u ćirilici i latinici", () => {
     const other = await createPatient({ name: "Ana", lastName: "Anić" });
     assert.equal((await as(admin).put(`/api/patient/${other._id}`, { name: "Milica", lastName: "Jovanović" })).status, 409);
     assert.equal((await as(admin).put(`/api/patient/${existing._id}`, { name: "Milica", lastName: "Jovanović", address: "Novi Sad" })).status, 200);
+  });
+});
+
+describe("socijalni radnik", () => {
+  test("menja podatke, briše korisnika bez dokumentacije i duplikate; i trajno briše kao admin", async () => {
+    const social = await createUser("social-worker");
+    const s = as(social);
+    const patient = await createPatient({ name: "Pera", lastName: "Perić" });
+    const edited = await s.put(`/api/patient/${patient._id}`, { name: "Petar", address: "Niš" });
+    assert.equal(edited.status, 200);
+    assert.equal(edited.body.patient.name, "Petar");
+    assert.equal((await as(nurse).put(`/api/patient/${patient._id}`, { address: "x" })).status, 403);
+
+    await createPatient({ name: "Петар", lastName: "Перић" });
+    assert.equal((await s.post("/api/patient/duplicates/remove")).body.removed, 1);
+
+    assert.equal((await s.del(`/api/patient/${patient._id}`)).status, 200);
+    assert.equal(await Patient.countDocuments(), 0);
+
+    // Trajno brisanje sa svim podacima, kao admin (uz ukucano ime); glavna sestra ne može
+    const withData = await createPatient({ name: "Mara", lastName: "Marić" });
+    await Specification.create({ patientId: withData._id, startDate: new Date(), endDate: new Date(), items: [{ name: "Lek", price: 1, amount: 1 }] });
+    const purge = (u: UserDoc, confirmName: string) => request(app).delete(`/api/patient/${withData._id}?permanent=true`).set(authHeader(u)).send({ confirmName });
+    assert.equal((await purge(mainNurse, "Mara Marić")).status, 403);
+    assert.equal((await purge(social, "Pogrešno ime")).status, 400);
+    assert.equal((await purge(social, "Mara Marić")).status, 200);
+    assert.equal(await Specification.countDocuments({ patientId: withData._id }), 0);
+    assert.equal((await as(nurse).del(`/api/patient/${(await createPatient())._id}`)).status, 403);
   });
 });
