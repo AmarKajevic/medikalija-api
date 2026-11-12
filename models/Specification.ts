@@ -93,6 +93,9 @@ const specificationSchema = new mongoose.Schema({
     nextPeriodEnd: { type: Date },
   },
 
+  /** Napomena uprave — štampa se na dnu specifikacije (ispod tabela) */
+  note: { type: String, default: "", maxlength: 2000 },
+
   createdAt: { type: Date, default: Date.now },
 },
 // Svako čuvanje proverava verziju dokumenta — istovremene izmene iste

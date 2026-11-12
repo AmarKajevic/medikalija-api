@@ -32,6 +32,7 @@ import lodgingPricesRouter from "./routes/lodgingPrices.js";
 import lodgingNotesRouter from "./routes/lodgingNotes.js";
 import physioPricesRouter from "./routes/physioPrices.js";
 import professionalServicesRouter from "./routes/professionalServices.js";
+import extraCostsRouter from "./routes/extraCosts.js";
 import medicalReportsRouter from "./routes/medicalReports.js"
 import socialNotesRouter from "./routes/socialNotes.js"
 import socialDossierRouter from "./routes/socialDossier.js";
@@ -98,6 +99,7 @@ app.use("/api/lodging-prices", lodgingPricesRouter);
 app.use("/api/lodging-notes", lodgingNotesRouter);
 app.use("/api/physio-prices", physioPricesRouter);
 app.use("/api/professional-services", professionalServicesRouter);
+app.use("/api/extra-costs", extraCostsRouter);
 app.use("/api/medical-reports", medicalReportsRouter);
 app.use("/api/social-notes", socialNotesRouter);
 app.use("/api/social", socialDossierRouter);
