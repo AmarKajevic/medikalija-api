@@ -225,8 +225,16 @@ describe("nove vrste fizikalne terapije", () => {
     assert.equal(charged.body.specification.items[0].price, 1500);
 
     assert.equal((await as(admin).put(`/api/physio-prices/${kind}`, { name: "Limfna drenaža — 30 min", priceRSD: 1600 })).status, 200);
-    assert.equal((await as(admin).del("/api/physio-prices/active")).status, 400, "osnovna vrsta ostaje");
     assert.equal((await as(admin).del(`/api/physio-prices/${kind}`)).status, 200);
     assert.equal((await as(mainNurse).get("/api/physio-prices")).body.prices.length, 3);
+
+    // Osnovne vrste se takođe menjaju i brišu
+    assert.equal((await as(admin).put("/api/physio-prices/group", { name: "Grupne vežbe", priceRSD: 700 })).status, 200);
+    assert.ok((await as(mainNurse).get("/api/physio-prices")).body.prices.some((p: { kind: string; name: string }) => p.kind === "group" && p.name === "Grupne vežbe"));
+    assert.equal((await as(admin).del("/api/physio-prices/passive")).status, 200);
+    const left = (await as(mainNurse).get("/api/physio-prices")).body.prices.map((p: { kind: string }) => p.kind);
+    assert.deepEqual(left, ["active", "group"]);
+    assert.equal((await as(mainNurse).post("/api/physio-prices/charge", { patientId: String(patient._id), kind: "passive" })).status, 400, "obrisana se ne naplaćuje");
+    assert.equal((await as(admin).del("/api/physio-prices/passive")).status, 404);
   });
 });
