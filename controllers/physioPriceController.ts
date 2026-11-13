@@ -53,12 +53,12 @@ export const createPhysioKind = async (req: Request, res: Response) => {
   }
 };
 
-// PUT /api/physio-prices/:kind { priceRSD, name? } — naziv se menja samo kod dodatih vrsta
+// PUT /api/physio-prices/:kind { priceRSD, name? } — cena i naziv (i kod osnovnih vrsta)
 export const setPhysioPrice = async (req: Request, res: Response) => {
   try {
     const current = await findPhysioKind(param(req, "kind"));
     const set: Record<string, unknown> = { priceRSD: readPrice(req.body?.priceRSD), updatedBy: req.user._id };
-    if (current.custom && req.body?.name !== undefined) set.name = await readName(req.body.name, current.kind);
+    if (req.body?.name !== undefined) set.name = await readName(req.body.name, current.kind);
     const saved = await PhysioPrice.findOneAndUpdate({ kind: current.kind }, { $set: set }, { new: true, upsert: true, runValidators: true });
     res.json({ success: true, price: saved });
   } catch (err) {
@@ -66,13 +66,17 @@ export const setPhysioPrice = async (req: Request, res: Response) => {
   }
 };
 
-// DELETE /api/physio-prices/:kind — briše dodatu vrstu (osnovne ostaju). Već naplaćene stavke čuvaju naziv i cenu.
+// DELETE /api/physio-prices/:kind — briše vrstu terapije (i osnovnu). Već naplaćene stavke čuvaju naziv i cenu.
 export const deletePhysioKind = async (req: Request, res: Response) => {
   try {
-    const kind = param(req, "kind");
-    if (isBuiltInPhysioKind(kind)) throw httpError(400, "Osnovne vrste terapije se ne mogu obrisati.");
-    const removed = await PhysioPrice.findOneAndDelete({ kind });
-    if (!removed) throw httpError(404, "Terapija nije pronađena.");
+    const current = await findPhysioKind(param(req, "kind")).catch(() => null);
+    if (!current) throw httpError(404, "Terapija nije pronađena.");
+    // Osnovna vrsta ostaje zapamćena kao obrisana (inače bi se ponovo pojavila); dodata se briše iz baze
+    if (isBuiltInPhysioKind(current.kind)) {
+      await PhysioPrice.findOneAndUpdate({ kind: current.kind }, { $set: { deleted: true, updatedBy: req.user._id } }, { upsert: true });
+    } else {
+      await PhysioPrice.deleteOne({ kind: current.kind });
+    }
     res.json({ success: true, message: "Terapija je obrisana." });
   } catch (err) {
     fail(res, err);
