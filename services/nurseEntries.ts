@@ -13,7 +13,8 @@ import Article from "../models/Articles.js";
 import Patient from "../models/Patient.js";
 import CareTask from "../models/CareTask.js";
 import PhysioPrice from "../models/PhysioPrice.js";
-import NurseEntry, { ENTRY_TYPES, type EntryType, type NurseEntryDoc, PHYSIO_KINDS, type PhysioKind } from "../models/NurseEntry.js";
+import NurseEntry, { ENTRY_TYPES, type EntryType, type NurseEntryDoc } from "../models/NurseEntry.js";
+import { findPhysioKind } from "./physioKinds.js";
 import User, { type UserAttrs } from "../models/User.js";
 import { isManagerRole } from "../middleware/requireRole.js";
 import { httpError } from "../utils/errors.js";
@@ -25,7 +26,7 @@ type Actor = HydratedDocument<UserAttrs>;
 export interface EntryInput {
   type: unknown;
   itemId?: unknown;
-  /** Fizikalna terapija: "active" | "passive" | "group" i da li je vanredna */
+  /** Fizikalna terapija: vrsta ("active" | "passive" | "group" ili dodata) i da li je vanredna */
   physioKind?: unknown;
   extra?: unknown;
   amount?: unknown;
@@ -39,11 +40,6 @@ const STALE_LOCK_MS = 2 * 60_000;
 
 const MODEL_BY_TYPE = { medicine: Medicine, article: Article, care: CareTask } as const;
 
-export const PHYSIO_LABEL: Record<PhysioKind, string> = {
-  active: "Individualna aktivna fizikalna terapija",
-  passive: "Individualna pasivna fizikalna terapija",
-  group: "Grupna fizikalna terapija",
-};
 const canLogPhysio = (role: string) => role === "physiotherapist" || isManagerRole(role);
 
 function parsePerformedAt(value: unknown): Date {
@@ -62,15 +58,14 @@ async function buildEntry(patientId: Types.ObjectId, input: EntryInput, user: Ac
   // Fizioterapeut unosi samo fizikalnu terapiju; nju (osim uprave) unosi samo fizioterapeut
   if (type === "physio") {
     if (!canLogPhysio(user.role)) throw httpError(403, "Fizikalnu terapiju unosi fizioterapeut.");
-    const kind = input.physioKind as PhysioKind;
-    if (!PHYSIO_KINDS.includes(kind)) throw httpError(400, "Izaberite vrstu fizikalne terapije.");
+    const physio = await findPhysioKind(input.physioKind);
     const extra = input.extra === true;
     return {
       patient: patientId,
       type,
-      physioKind: kind,
+      physioKind: physio.kind,
       extra,
-      name: `${PHYSIO_LABEL[kind]}${extra ? " (vanredna)" : ""}`,
+      name: `${physio.name}${extra ? " (vanredna)" : ""}`,
       amount: 1,
       note: typeof input.note === "string" ? input.note.trim().slice(0, 500) : "",
       performedAt: parsePerformedAt(input.performedAt),
@@ -167,9 +162,8 @@ export async function acceptEntry(entryId: unknown, user: Actor, amount?: unknow
 
     if (entry.type === "physio") {
       // Vanredna fizikalna terapija: cena iz cenovnika koji admin unosi unapred
-      const kind = entry.physioKind as PhysioKind;
-      const listed = await PhysioPrice.findOne({ kind }).lean();
-      if (!listed) throw httpError(400, `Cena za „${PHYSIO_LABEL[kind] ?? "terapiju"}” nije uneta. Admin je unosi u „Cene fizioterapije”.`);
+      const listed = await PhysioPrice.findOne({ kind: entry.physioKind }).lean();
+      if (!listed) throw httpError(400, `Cena za „${entry.name.replace(/ \(vanredna\)$/, "")}” nije uneta. Admin je unosi u „Cene fizioterapije”.`);
       const price = round2(listed.priceRSD);
       const spec = await resolveTargetSpecification(entry.patient, { at: entry.performedAt, specificationId: targetSpecificationId });
       specificationId = spec._id;

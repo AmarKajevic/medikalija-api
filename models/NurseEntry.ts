@@ -26,7 +26,8 @@ const nurseEntrySchema = new mongoose.Schema(
     article: { type: mongoose.Schema.Types.ObjectId, ref: "Article", default: null },
     careTask: { type: mongoose.Schema.Types.ObjectId, ref: "CareTask", default: null },
     /** Fizikalna terapija: vrsta i da li je vanredna (naplaćuje se) */
-    physioKind: { type: String, enum: [...PHYSIO_KINDS, null], default: null },
+    // Osnovna vrsta ("active" | "passive" | "group") ili vrsta koju je dodao admin (vidi PhysioPrice)
+    physioKind: { type: String, default: null },
     extra: { type: Boolean, default: false },
     /** Naziv u trenutku unosa (ostaje i ako se lek/usluga kasnije preimenuje ili obriše) */
     name: { type: String, required: true },
