@@ -175,3 +175,58 @@ describe("otpust", () => {
     assert.ok((await Patient.findById(patient._id))?.dischargeDate);
   });
 });
+
+describe("vanredna fizikalna terapija iz specifikacije", () => {
+  test("uprava dodaje terapiju po ceni iz cenovnika; bez cene i sestra ne mogu", async () => {
+    const patient = await createPatient();
+    const spec = await Specification.create({ patientId: patient._id, startDate: new Date(), endDate: new Date(), items: [], isActive: true });
+    const body = { patientId: String(patient._id), kind: "active", amount: 2, specificationId: String(spec._id) };
+    assert.equal((await as(mainNurse).post("/api/physio-prices/charge", body)).status, 400, "cena nije uneta");
+    await as(admin).put("/api/physio-prices/active", { priceRSD: 1000 });
+    assert.equal((await as(nurse).post("/api/physio-prices/charge", body)).status, 403);
+    const res = await as(mainNurse).post("/api/physio-prices/charge", body);
+    assert.equal(res.status, 201, res.body.message);
+    const item = res.body.specification.items[0];
+    assert.equal(item.category, "physio");
+    assert.equal(item.price, 2000);
+    assert.equal(item.amount, 2);
+    assert.match(item.name, /aktivna.*\(vanredna\)/);
+    assert.equal(res.body.specification.totalPrice, 2000);
+    assert.equal((await as(mainNurse).post("/api/physio-prices/charge", { ...body, kind: "x" })).status, 400);
+  });
+});
+
+describe("nove vrste fizikalne terapije", () => {
+  test("admin dodaje, menja i briše vrstu; ona se nudi, naplaćuje i unosi kao osnovne", async () => {
+    const created = await as(admin).post("/api/physio-prices", { name: "Limfna drenaža", priceRSD: 1500 });
+    assert.equal(created.status, 201);
+    const kind = created.body.price.kind;
+    assert.equal((await as(admin).post("/api/physio-prices", { name: "limfna drenaža", priceRSD: 1 })).status, 409);
+    assert.equal((await as(admin).post("/api/physio-prices", { name: "Individualna aktivna fizikalna terapija", priceRSD: 1 })).status, 409);
+    assert.equal((await as(mainNurse).post("/api/physio-prices", { name: "X", priceRSD: 1 })).status, 403);
+
+    const list = (await as(mainNurse).get("/api/physio-prices")).body.prices;
+    assert.equal(list.length, 4);
+    assert.deepEqual(list[3], { kind, name: "Limfna drenaža", priceRSD: 1500, custom: true });
+
+    const physio = await createUser("physiotherapist");
+    const kinds = (await as(physio).get("/api/physio-prices/kinds")).body.kinds;
+    assert.ok(kinds.some((k: { name: string }) => k.name === "Limfna drenaža"));
+    assert.equal((await as(physio).get("/api/physio-prices")).status, 403, "fizioterapeut ne vidi cene");
+
+    // Unos fizioterapeuta i naplata iz specifikacije
+    const patient = await createPatient();
+    const entry = await as(physio).post("/api/nurse-entries", { patientId: String(patient._id), entries: [{ type: "physio", physioKind: kind, extra: true }] });
+    assert.equal(entry.status, 201, entry.body.message);
+    const spec = await Specification.create({ patientId: patient._id, startDate: new Date(), endDate: new Date(), items: [], isActive: true });
+    const charged = await as(mainNurse).post("/api/physio-prices/charge", { patientId: String(patient._id), kind, specificationId: String(spec._id) });
+    assert.equal(charged.status, 201, charged.body.message);
+    assert.equal(charged.body.specification.items[0].name, "Limfna drenaža (vanredna)");
+    assert.equal(charged.body.specification.items[0].price, 1500);
+
+    assert.equal((await as(admin).put(`/api/physio-prices/${kind}`, { name: "Limfna drenaža — 30 min", priceRSD: 1600 })).status, 200);
+    assert.equal((await as(admin).del("/api/physio-prices/active")).status, 400, "osnovna vrsta ostaje");
+    assert.equal((await as(admin).del(`/api/physio-prices/${kind}`)).status, 200);
+    assert.equal((await as(mainNurse).get("/api/physio-prices")).body.prices.length, 3);
+  });
+});

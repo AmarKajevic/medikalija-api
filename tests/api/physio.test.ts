@@ -59,7 +59,7 @@ describe("fizikalna terapija", () => {
     const mainNurse = await createUser("main-nurse");
     assert.equal((await put("active", 100, mainNurse)).status, 403, "cene menja admin");
     const list = (await as(mainNurse).get("/api/physio-prices")).body.prices;
-    assert.deepEqual(list, [{ kind: "active", priceRSD: null }, { kind: "passive", priceRSD: 1500 }, { kind: "group", priceRSD: 800 }]);
+    assert.deepEqual(list.map(({ kind, priceRSD }: { kind: string; priceRSD: number | null }) => ({ kind, priceRSD })), [{ kind: "active", priceRSD: null }, { kind: "passive", priceRSD: 1500 }, { kind: "group", priceRSD: 800 }]);
     assert.equal((await as(physio).get("/api/physio-prices")).status, 403);
 
     const ok = await as(admin).post(`/api/nurse-entries/${entry._id}/accept`, { price: 1 });

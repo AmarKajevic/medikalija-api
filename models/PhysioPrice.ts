@@ -1,11 +1,14 @@
 import mongoose, { type InferSchemaType } from "mongoose";
-import { PHYSIO_KINDS } from "./NurseEntry.js";
 
 // Cenovnik vanredne fizikalne terapije (po vrsti terapije). Pravi ga admin unapred;
-// kad uprava odobri vanrednu terapiju, cena se uzima odavde.
+// kad uprava odobri vanrednu terapiju (ili je doda u specifikaciju), cena se uzima odavde.
+// Tri osnovne vrste ("active", "passive", "group") postoje uvek; admin može da doda nove
+// (kind = "c" + id, naziv u `name`).
 const physioPriceSchema = new mongoose.Schema(
   {
-    kind: { type: String, enum: PHYSIO_KINDS, required: true, unique: true },
+    kind: { type: String, required: true, unique: true, maxlength: 40 },
+    /** Naziv nove vrste (osnovne vrste imaju ugrađen naziv) */
+    name: { type: String, trim: true, default: "", maxlength: 160 },
     priceRSD: { type: Number, required: true, min: 0 },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },

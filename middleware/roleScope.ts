@@ -35,6 +35,8 @@ const SCOPES: Record<string, Rule[]> = {
     ["*", "/api/auth"],
     ["GET", "/api/patient"],
     [["GET", "POST", "DELETE"], "/api/nurse-entries"],
+    // Vrste fizikalne terapije (bez cena)
+    ["GET", "/api/physio-prices/kinds"],
     ["*", "/api/calendar"],
     ["GET", "/api/dashboard"],
     ["*", "/api/notifications"],
