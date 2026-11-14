@@ -38,7 +38,7 @@ describe("fizikalna terapija", () => {
     assert.equal(regular.status, "logged");
     assert.equal(regular.name, "Individualna aktivna fizikalna terapija");
     assert.equal(extra.status, "pending");
-    assert.equal(extra.name, "Grupna fizikalna terapija (vanredna)");
+    assert.equal(extra.name, "Grupna fizikalna terapija");
     assert.equal((await spec()).items.length, 0, "ništa još nije naplaćeno");
 
     const mine = (await as(physio).get("/api/nurse-entries?mine=1&type=physio")).body.entries;
@@ -65,7 +65,7 @@ describe("fizikalna terapija", () => {
     const ok = await as(admin).post(`/api/nurse-entries/${entry._id}/accept`, { price: 1 });
     assert.equal(ok.status, 200, ok.body.message);
     const item = must((await spec()).items.find((i: { category?: string }) => i.category === "physio"));
-    assert.equal(item.name, "Individualna pasivna fizikalna terapija (vanredna)");
+    assert.equal(item.name, "Individualna pasivna fizikalna terapija");
     assert.equal(item.price, 1500);
 
     // I grupno odobravanje uzima cenu iz cenovnika (poslata cena se ne koristi)
