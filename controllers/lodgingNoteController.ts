@@ -5,10 +5,12 @@ import { param } from "../utils/http.js";
 
 const fail = (res: Response, err: unknown) => {
   if ((err as { code?: number }).code === 11000) {
-    return res.status(409).json({ success: false, message: "Ta napomena već postoji." });
+    return res.status(409).json({ success: false, message: "Taj tekst već postoji (kao napomena ili naziv)." });
   }
   res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
 };
+
+const readKind = (body: Record<string, unknown> | undefined) => (body?.kind === "title" ? "title" : "note");
 
 const readText = (body: Record<string, unknown> | undefined) => {
   const text = typeof body?.text === "string" ? body.text.trim() : "";
@@ -29,7 +31,7 @@ export const listNotes = async (_req: Request, res: Response) => {
 
 export const createNote = async (req: Request, res: Response) => {
   try {
-    const note = await LodgingNote.create({ text: readText(req.body), createdBy: req.user._id });
+    const note = await LodgingNote.create({ text: readText(req.body), kind: readKind(req.body), createdBy: req.user._id });
     res.status(201).json({ success: true, note });
   } catch (err) {
     fail(res, err);

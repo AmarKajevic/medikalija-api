@@ -1,10 +1,13 @@
 import mongoose, { type InferSchemaType } from "mongoose";
 
-// Napomene za vanstandardni period smeštaja (npr. "Smeštaj od dana prijema do početka perioda").
-// Pravi ih admin uz cene smeštaja; u obračunu se bira napomena koja se štampa u redu smeštaja.
+// Šabloni za vanstandardni period smeštaja. Pravi ih admin uz cene smeštaja; bira ih uprava u obračunu.
+//  note  — napomena koja se dopisuje u red smeštaja ("Smeštaj za period … – napomena")
+//  title — naziv koji ide u specifikaciju TAČNO kako je napisan, umesto "Smeštaj za period …"
+//          (npr. "Otkazni rok 15 dana — pacijent izlazi za 10 dana")
 const lodgingNoteSchema = new mongoose.Schema(
   {
     text: { type: String, required: true, trim: true, maxlength: 300 },
+    kind: { type: String, enum: ["note", "title"], default: "note" },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true }

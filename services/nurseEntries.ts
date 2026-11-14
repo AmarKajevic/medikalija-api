@@ -65,7 +65,7 @@ async function buildEntry(patientId: Types.ObjectId, input: EntryInput, user: Ac
       type,
       physioKind: physio.kind,
       extra,
-      name: `${physio.name}${extra ? " (vanredna)" : ""}`,
+      name: physio.name,
       amount: 1,
       note: typeof input.note === "string" ? input.note.trim().slice(0, 500) : "",
       performedAt: parsePerformedAt(input.performedAt),

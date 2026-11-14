@@ -190,7 +190,7 @@ describe("vanredna fizikalna terapija iz specifikacije", () => {
     assert.equal(item.category, "physio");
     assert.equal(item.price, 2000);
     assert.equal(item.amount, 2);
-    assert.match(item.name, /aktivna.*\(vanredna\)/);
+    assert.equal(item.name, "Individualna aktivna fizikalna terapija");
     assert.equal(res.body.specification.totalPrice, 2000);
     assert.equal((await as(mainNurse).post("/api/physio-prices/charge", { ...body, kind: "x" })).status, 400);
   });
@@ -221,7 +221,7 @@ describe("nove vrste fizikalne terapije", () => {
     const spec = await Specification.create({ patientId: patient._id, startDate: new Date(), endDate: new Date(), items: [], isActive: true });
     const charged = await as(mainNurse).post("/api/physio-prices/charge", { patientId: String(patient._id), kind, specificationId: String(spec._id) });
     assert.equal(charged.status, 201, charged.body.message);
-    assert.equal(charged.body.specification.items[0].name, "Limfna drenaža (vanredna)");
+    assert.equal(charged.body.specification.items[0].name, "Limfna drenaža");
     assert.equal(charged.body.specification.items[0].price, 1500);
 
     assert.equal((await as(admin).put(`/api/physio-prices/${kind}`, { name: "Limfna drenaža — 30 min", priceRSD: 1600 })).status, 200);
@@ -255,5 +255,30 @@ describe("šabloni za medicinsko osoblje", () => {
     assert.equal((await as(nurse).del(`/api/diagnosisTemplate/${id}`)).status, 403);
     assert.equal((await as(admin).del(`/api/diagnosisTemplate/${id}`)).status, 200);
     assert.equal((await as(admin).del(`/api/diagnosisTemplate/${id}`)).status, 404);
+  });
+});
+
+describe("naziv vanstandardnog smeštaja", () => {
+  test("admin pravi nazive uz napomene; naziv se čuva u obračunu tačno kako je napisan", async () => {
+    const title = await as(admin).post("/api/lodging-notes", { text: "Otkazni rok 15 dana — izlazak za 10 dana", kind: "title" });
+    assert.equal(title.status, 201);
+    assert.equal(title.body.note.kind, "title");
+    const note = await as(admin).post("/api/lodging-notes", { text: "Od dana prijema" });
+    assert.equal(note.body.note.kind, "note", "bez vrste je napomena (kao do sada)");
+    assert.equal((await as(admin).post("/api/lodging-notes", { text: "od dana prijema", kind: "title" })).status, 409);
+    assert.equal((await as(mainNurse).get("/api/lodging-notes")).body.notes.length, 2);
+
+    const patient = await createPatient();
+    const spec = await Specification.create({ patientId: patient._id, startDate: new Date(), endDate: new Date(), items: [] });
+    const saved = await as(mainNurse).post(`/api/specification/${spec._id}/billing`, {
+      includeEarlyLodging: true,
+      earlyLodgingEUR: 100,
+      earlyLodgingTitle: "  Otkazni rok 15 dana — izlazak za 10 dana ",
+    });
+    assert.equal(saved.status, 200, saved.body.message);
+    assert.equal((await Specification.findById(spec._id))?.billing?.earlyLodgingTitle, "Otkazni rok 15 dana — izlazak za 10 dana");
+    // Isključen vanstandardni smeštaj ne čuva naziv
+    await as(mainNurse).post(`/api/specification/${spec._id}/billing`, { includeEarlyLodging: false, earlyLodgingTitle: "x" });
+    assert.equal((await Specification.findById(spec._id))?.billing?.earlyLodgingTitle, "");
   });
 });

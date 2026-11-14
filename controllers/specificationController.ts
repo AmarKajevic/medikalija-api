@@ -283,6 +283,7 @@ const saveBillingForSpecification = async (req: Request, res: Response) => {
       earlyLodgingRSD: earlyRSD,
       earlyLodgingOption: includeEarlyLodging ? optionLabel(req.body.earlyLodgingOption) : "",
       earlyLodgingNote: includeEarlyLodging && typeof req.body.earlyLodgingNote === "string" ? req.body.earlyLodgingNote.trim().slice(0, 300) : "",
+      earlyLodgingTitle: includeEarlyLodging && typeof req.body.earlyLodgingTitle === "string" ? req.body.earlyLodgingTitle.trim().slice(0, 300) : "",
       earlyLodgingStart: earlyStart ?? undefined,
       earlyLodgingEnd: earlyEnd ?? undefined,
       specEUR,

@@ -81,6 +81,8 @@ const specificationSchema = new mongoose.Schema({
     earlyLodgingOption: { type: String, default: "" },
     /** Napomena uz vanstandardni smeštaj (iz liste koju pravi admin) — štampa se u istom redu */
     earlyLodgingNote: { type: String, default: "" },
+    /** Naziv vanstandardnog smeštaja — štampa se tačno ovako umesto "Smeštaj za period …" */
+    earlyLodgingTitle: { type: String, default: "" },
     /** Datumi vanstandardnog perioda (od–do) — štampaju se u istom redu */
     earlyLodgingStart: { type: Date },
     earlyLodgingEnd: { type: Date },
