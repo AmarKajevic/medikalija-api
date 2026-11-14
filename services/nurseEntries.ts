@@ -163,7 +163,7 @@ export async function acceptEntry(entryId: unknown, user: Actor, amount?: unknow
     if (entry.type === "physio") {
       // Vanredna fizikalna terapija: cena iz cenovnika koji admin unosi unapred
       const listed = await PhysioPrice.findOne({ kind: entry.physioKind }).lean();
-      if (!listed) throw httpError(400, `Cena za „${entry.name.replace(/ \(vanredna\)$/, "")}” nije uneta. Admin je unosi u „Cene fizioterapije”.`);
+      if (!listed) throw httpError(400, `Cena za „${entry.name.replace(/ \(vanredna\)$/, "")}” nije uneta. Admin je unosi u „Šabloni i cene → Fizikalna terapija”.`);
       const price = round2(listed.priceRSD);
       const spec = await resolveTargetSpecification(entry.patient, { at: entry.performedAt, specificationId: targetSpecificationId });
       specificationId = spec._id;

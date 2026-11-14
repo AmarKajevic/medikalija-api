@@ -238,3 +238,22 @@ describe("nove vrste fizikalne terapije", () => {
     assert.equal((await as(admin).del("/api/physio-prices/passive")).status, 404);
   });
 });
+
+describe("šabloni za medicinsko osoblje", () => {
+  test("uprava dodaje, menja i briše šablon; sestra samo čita", async () => {
+    const created = await as(mainNurse).post("/api/diagnosisTemplate/add", { name: "Pritisak", description: "Izmeren pritisak: ___" });
+    assert.equal(created.status, 201);
+    const id = created.body.template._id;
+    assert.equal((await as(mainNurse).post("/api/diagnosisTemplate/add", { name: "Bez teksta" })).status, 400);
+    assert.equal((await as(nurse).post("/api/diagnosisTemplate/add", { name: "X", description: "Y" })).status, 403);
+    assert.equal((await as(nurse).get("/api/diagnosisTemplate")).body.diagnosisTemplates.length, 1);
+
+    const edited = await as(admin).put(`/api/diagnosisTemplate/${id}`, { name: "Krvni pritisak", description: "TA: ___/___ mmHg" });
+    assert.equal(edited.status, 200);
+    assert.equal(edited.body.template.name, "Krvni pritisak");
+    assert.equal((await as(nurse).put(`/api/diagnosisTemplate/${id}`, { name: "a", description: "b" })).status, 403);
+    assert.equal((await as(nurse).del(`/api/diagnosisTemplate/${id}`)).status, 403);
+    assert.equal((await as(admin).del(`/api/diagnosisTemplate/${id}`)).status, 200);
+    assert.equal((await as(admin).del(`/api/diagnosisTemplate/${id}`)).status, 404);
+  });
+});

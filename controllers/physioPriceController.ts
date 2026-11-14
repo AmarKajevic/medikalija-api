@@ -92,7 +92,7 @@ export const chargePhysio = async (req: Request, res: Response) => {
     const physio = await findPhysioKind(kind);
     const times = req.body?.amount === undefined ? 1 : round2(req.body.amount);
     if (!(times > 0) || times > 1000) throw httpError(400, "Broj puta mora biti veći od nule.");
-    if (physio.priceRSD == null) throw httpError(400, `Cena za „${physio.name}” nije uneta. Admin je unosi u „Cene fizioterapije”.`);
+    if (physio.priceRSD == null) throw httpError(400, `Cena za „${physio.name}” nije uneta. Admin je unosi u „Šabloni i cene → Fizikalna terapija”.`);
     const spec = await resolveTargetSpecification(String(patientId ?? ""), { specificationId });
     const name = `${physio.name} (vanredna)`;
     const { specification } = await addServiceCharge(spec, { name, times, unitPrice: physio.priceRSD, createdBy: req.user._id, category: "physio" });
