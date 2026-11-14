@@ -49,7 +49,7 @@ describe("fizikalna terapija", () => {
     const [entry] = (await log(physio, [{ type: "physio", physioKind: "passive", extra: true }])).body.entries;
     const noPrice = await as(admin).post(`/api/nurse-entries/${entry._id}/accept`, {});
     assert.equal(noPrice.status, 400, "bez cene u cenovniku");
-    assert.match(noPrice.body.message, /Cene fizioterapije/);
+    assert.match(noPrice.body.message, /Šabloni i cene → Fizikalna terapija/);
 
     const put = (kind: string, priceRSD: unknown, user: UserDoc = admin) => request(app).put(`/api/physio-prices/${kind}`).set(authHeader(user)).send({ priceRSD });
     assert.equal((await put("passive", 1500)).status, 200);
