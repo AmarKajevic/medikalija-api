@@ -175,6 +175,13 @@ async function replaceRange(patientId: Id, start: Date, end: Date): Promise<Spec
   return findOrCreateSpecForRange(patientId, start, end);
 }
 
+/** Koliko perioda posle današnjeg se može izabrati za specifikaciju (rad unapred) */
+export const BILLING_PERIODS_AHEAD = 3;
+
+/** Najkasniji dozvoljeni početak perioda specifikacije: današnji period + BILLING_PERIODS_AHEAD unapred */
+const latestBillingStart = () => addDays(today(), BILLING_PERIODS_AHEAD * SPEC_PERIOD_DAYS);
+const TOO_FAR = `Period specifikacije može biti najviše ${BILLING_PERIODS_AHEAD} perioda unapred.`;
+
 // Bira PERIOD SPECIFIKACIJE (postojeći zapis ili ručni datumi). Smeštaj za period (aktivan)
 // se ne bira — uvek je to period koji počinje dan posle kraja perioda specifikacije
 // (postojeći zapis tog dana ili novih 30 dana) i naplaćuje se unapred.
@@ -196,14 +203,14 @@ export async function setBillingPeriod(
     const start = parseCalendarDay(startDate);
     const end = parseCalendarDay(endDate);
     if (!start || !end || end < start) throw httpError(400, "Neispravan opseg datuma");
-    if (start > today()) throw httpError(409, "Period specifikacije ne može početi u budućnosti.");
+    if (start > latestBillingStart()) throw httpError(409, TOO_FAR);
     billing = await replaceRange(patientId, start, end);
   }
 
   const billingStart = normalizeStoredDay(billing.startDate);
   const billingEnd = normalizeStoredDay(billing.endDate);
   if (!billingStart || !billingEnd) throw httpError(400, "Neispravan period.");
-  if (billingStart > today()) throw httpError(409, "Period specifikacije ne može početi u budućnosti.");
+  if (billingStart > latestBillingStart()) throw httpError(409, TOO_FAR);
 
   // Smeštaj za period: zapis koji počinje dan posle (npr. ručno menjanih datuma), inače novih 30 dana
   const nextStart = addDays(billingEnd, 1);
@@ -398,8 +405,8 @@ export interface SelectablePeriod extends PastPeriod {
   isCurrent: boolean;
 }
 
-// Svi redovni periodi među kojima uprava bira aktivan: od prijema do današnjeg
-// (ili aktivnog, ako je kasniji) i još jedan unapred, od najnovijeg. Posle povratka
+// Svi redovni periodi među kojima uprava bira: od prijema do današnjeg (ili aktivnog, ako je
+// kasniji) i još BILLING_PERIODS_AHEAD unapred (specifikacija unapred), od najnovijeg. Posle povratka
 // na raniji period ovde su i kasniji periodi, pa se uvek može vratiti napred.
 export async function listSelectablePeriods(patientId: Id): Promise<SelectablePeriod[]> {
   const patient = await Patient.findById(patientId);
@@ -411,10 +418,14 @@ export async function listSelectablePeriods(patientId: Id): Promise<SelectablePe
   const day = today();
   const activeEnd = normalizeStoredDay(active?.endDate);
   const until = activeEnd && activeEnd > day ? activeEnd : day;
-  // Prvo do današnjeg/aktivnog, pa još jedan period posle njega
-  const base = buildPeriodChain(admission, specs, until).periods;
-  const lastEnd = base[base.length - 1]?.endDate;
-  const { periods, skipped } = buildPeriodChain(admission, specs, lastEnd ? addDays(lastEnd, 1) : until);
+  // Prvo do današnjeg/aktivnog, pa periodi unapred (lanac se produžava period po period)
+  let chain = buildPeriodChain(admission, specs, until);
+  for (let i = 0; i < BILLING_PERIODS_AHEAD; i++) {
+    const lastEnd = chain.periods[chain.periods.length - 1]?.endDate;
+    if (!lastEnd) break;
+    chain = buildPeriodChain(admission, specs, addDays(lastEnd, 1));
+  }
+  const { periods, skipped } = chain;
 
   const isActive = (spec: SpecificationDoc | null) => !!active && !!spec && spec._id.equals(active._id);
   const activeStart = normalizeStoredDay(active?.startDate);
