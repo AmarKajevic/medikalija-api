@@ -338,14 +338,14 @@ describe("izbor aktivnog perioda", () => {
   type Row = { startDate: string; endDate: string; specificationId: string | null; isActive: boolean; isCurrent: boolean };
   const list = async (patientId: unknown): Promise<Row[]> => (await get(`/api/specification/${patientId}/periods`)).body.periods;
 
-  test("posle povratka na raniji period mogu se izabrati i kasniji, današnji i jedan unapred", async () => {
+  test("posle povratka na raniji period mogu se izabrati i kasniji, današnji i tri unapred", async () => {
     const { patient, active } = await setup(100);
     const before = await list(patient._id);
-    // 100 dana: 4 perioda do današnjeg + 1 unapred, od najnovijeg
-    assert.equal(before.length, 5);
-    assert.equal(before[1]!.specificationId, active._id);
-    assert.ok(before[1]!.isActive && before[1]!.isCurrent);
-    assert.ok(key(before[0]!.startDate) > key(day(0)), "prvi je period unapred");
+    // 100 dana: 4 perioda do današnjeg + 3 unapred, od najnovijeg
+    assert.equal(before.length, 7);
+    assert.equal(before[3]!.specificationId, active._id);
+    assert.ok(before[3]!.isActive && before[3]!.isCurrent);
+    assert.ok([0, 1, 2].every((i) => key(before[i]!.startDate) > key(day(0))), "prva tri su periodi unapred");
 
     // Povratak na period od pre ~3 meseca
     const oldest = before[before.length - 1]!;
@@ -353,7 +353,7 @@ describe("izbor aktivnog perioda", () => {
     assert.equal(back.status, 200, back.body.message);
 
     const after = await list(patient._id);
-    assert.equal(after.length, 5, "kasniji periodi ne nestaju");
+    assert.equal(after.length, 7, "kasniji periodi ne nestaju");
     assert.ok(after[after.length - 1]!.isActive, "aktivan je najstariji");
     const current = must(after.find((p) => p.isCurrent));
     assert.equal(current.specificationId, active._id);
@@ -410,9 +410,27 @@ describe("izbor perioda specifikacije (smeštaj za period ide sam za njim)", () 
     assert.equal(key(res.body.active.startDate), key(new Date(new Date(active.endDate).getTime() + DAY_MS)));
   });
 
-  test("provere: budućnost, neispravni datumi, uloga", async () => {
+  test("specifikacija unapred: do 3 perioda posle današnjeg; stavke idu u izabrani period", async () => {
     const { patient } = await setup(100);
-    assert.equal((await choose(patient._id, { startDate: key(day(3)), endDate: key(day(20)) })).status, 409);
+    const periods = await list(patient._id);
+    const currentIdx = periods.findIndex((p) => p.isCurrent);
+    assert.ok(currentIdx >= 3, "u listi su bar 3 perioda posle današnjeg");
+    const third = periods[currentIdx - 3]!; // lista je od najnovijeg
+    const res = await choose(patient._id, { startDate: key(third.startDate), endDate: key(third.endDate) });
+    assert.equal(res.status, 200, res.body.message);
+    assert.equal(key(res.body.specification.startDate), key(third.startDate));
+    assert.equal(key(res.body.active.startDate), key(new Date(new Date(third.endDate).getTime() + DAY_MS)), "smeštaj je period posle njega");
+
+    // Stavka se može dodati u izabrani period unapred
+    const med = await Medicine.create({ name: "Andol", pricePerUnit: 50, quantity: 10 });
+    const used = await post("/api/medicine/use", { patientId: String(patient._id), medicineId: String(med._id), amount: 1, specificationId: res.body.specification._id });
+    assert.equal(used.status, 200, used.body.message);
+    assert.equal(used.body.specification._id, res.body.specification._id);
+  });
+
+  test("provere: predaleko unapred, neispravni datumi, uloga", async () => {
+    const { patient } = await setup(100);
+    assert.equal((await choose(patient._id, { startDate: key(day(95)), endDate: key(day(120)) })).status, 409, "više od 3 perioda unapred");
     assert.equal((await choose(patient._id, { startDate: key(day(-3)), endDate: key(day(-10)) })).status, 400);
     assert.equal((await choose(patient._id, { specificationId: "x" })).status, 400);
     assert.equal((await choose(patient._id, { startDate: key(day(-40)), endDate: key(day(-5)) }, nurse)).status, 403);
