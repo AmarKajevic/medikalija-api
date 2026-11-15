@@ -1,4 +1,4 @@
-// Aktivnosti: šta je ko od osoblja dodao (unosi sestara, fizioterapija, učinak, direktni unosi uprave).
+// Aktivnosti: šta je ko od osoblja dodao (unosi sestara, fizikalna terapija, učinak, direktni unosi uprave).
 import { beforeEach, describe, test } from "node:test";
 import assert from "node:assert/strict";
 import request from "supertest";
