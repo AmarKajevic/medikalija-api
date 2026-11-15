@@ -3,7 +3,7 @@
 // "Aktivnosti": šta je ko od osoblja dodao pacijentima, na jednom mestu.
 //  - učinak rada / dijagnoza (sestre)
 //  - unosi sestara i fizioterapeuta (lek, artikal, nega, fizikalna terapija) sa statusom
-//    odobrenja — i ono što se ne naplaćuje (redovna fizioterapija, zabeleženo)
+//    odobrenja — i ono što se ne naplaćuje (redovna fizikalna terapija, zabeleženo)
 //  - lekovi, artikli i analize koje je uprava unela direktno u specifikaciju
 //    (potrošnja nastala prihvatanjem unosa sestre se ne ponavlja — već je prikazana kao unos)
 //  - beleške socijalnog radnika (samo naslov i kategorija, bez teksta)

@@ -94,7 +94,7 @@ describe("ponavljanje", () => {
   test("svakog utorka u 10:00 po beogradskom vremenu, i posle prelaska na letnje vreme", async () => {
     // 17.03.2026 10:00 CET = 09:00Z; letnje vreme počinje 29.03.
     await create({
-      title: "Fizioterapija",
+      title: "fizikalna terapija",
       allDay: false,
       start: "2026-03-17T09:00:00Z",
       end: "2026-03-17T10:00:00Z",
