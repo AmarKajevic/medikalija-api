@@ -108,6 +108,7 @@ describe("karton: podaci iz obrazaca", () => {
     assert.equal(f.ime_prezime_gen, "Milice Jovanović");
     assert.equal(f.godina_rodjenja, "1947.");
     assert.equal(f.datum_zahteva, "01.09.2026.");
+    assert.equal(f.datum_potpisa, f.datum_prijema, "bez datuma ugovora: datum prijema (ne današnji)");
     assert.equal(f.podnosilac, "Stevan Jovanović");
     assert.equal(f.podnosilac_lk, "012345678");
     assert.equal(f.k_rodjen, "rođena");

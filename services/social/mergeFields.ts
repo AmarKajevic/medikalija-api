@@ -337,7 +337,10 @@ export async function buildMergeData(patientId: string, author?: { name: string;
     // Ugovor ima posebno ime i prezime obveznika: prva reč je ime, ostalo prezime
     podnosilac_ime: signerName.trim().split(/\s+/)[0] ?? "",
     podnosilac_prezime: signerName.trim().split(/\s+/).slice(1).join(" "),
-    ugovor_datum: fmtDay(p.contractDate) || fmtDay(new Date()),
+    // Dokumenti koji se potpisuju pri prijemu (ugovor, saglasnosti, izjava 7, opšti podaci): datum ugovora,
+    // inače datum prijema — ne današnji, da obrazac odštampan kasnije ima tačan datum
+    ugovor_datum: fmtDay(p.contractDate) || fmtDay(patient.admissionDate),
+    datum_potpisa: fmtDay(p.contractDate) || fmtDay(patient.admissionDate),
     podnosilac_srodstvo: self ? "" : a.relation ?? "",
     podnosilac_adresa: self ? patient.address ?? "" : a.address ?? "",
     podnosilac_jmbg: self ? p.jmbg ?? "" : a.jmbg ?? "",
