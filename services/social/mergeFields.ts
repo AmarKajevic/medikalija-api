@@ -7,6 +7,8 @@ import SocialDocument from "../../models/SocialDocument.js";
 import SocialNote from "../../models/SocialNote.js";
 import GlobalSetting, { DEFAULT_FACILITY } from "../../models/GlobalSetting.js";
 import { calendarDayInZone, normalizeStoredDay } from "../../utils/dateUtils.js";
+import { genderWords, scaleFields } from "./formFields.js";
+import type { ScaleScores } from "./supportScale.js";
 
 export interface MergeFieldDef {
   key: string;
@@ -39,6 +41,32 @@ export const MERGE_FIELDS: MergeFieldDef[] = [
   F("Korisnik", "obrazovanje", "Obrazovanje"),
   F("Korisnik", "zanimanje", "Zanimanje"),
   F("Korisnik", "broj_licne_karte", "Broj lične karte"),
+  F("Korisnik", "prezime_ime", "Prezime i ime"),
+  F("Korisnik", "prezime_roditelj_ime", "Prezime, ime jednog roditelja i ime"),
+  F("Korisnik", "godina_rodjenja", "Godina rođenja"),
+  F("Korisnik", "prezime_pre_braka", "Prezime pre zaključenja braka"),
+  F("Korisnik", "otac", "Prezime i ime oca"),
+  F("Korisnik", "majka", "Prezime i ime majke i njeno devojačko prezime"),
+  F("Korisnik", "bracni_drug", "Bračni drug (ime, devojačko prezime, adresa)"),
+  F("Korisnik", "nacionalnost", "Nacionalnost"),
+  F("Korisnik", "veroispovest", "Veroispovest"),
+  F("Korisnik", "socijalni_status", "Socijalni status"),
+  F("Korisnik", "osiguranje_osnov", "Zdravstveno osiguranje — osnov"),
+  F("Korisnik", "imovina", "Podaci o imovini"),
+  F("Korisnik", "telefon", "Telefon korisnika"),
+  F("Korisnik", "email", "E-pošta korisnika"),
+  F("Korisnik", "dijagnoza", "Bolest (za izjavu srodnika)"),
+  F("Prijem", "datum_zahteva", "Datum zahteva za prijem"),
+  F("Prijem", "podnosilac", "Podnosilac zahteva / obveznik ugovora"),
+  F("Prijem", "podnosilac_srodstvo", "Srodstvo podnosioca"),
+  F("Prijem", "podnosilac_adresa", "Adresa podnosioca"),
+  F("Prijem", "podnosilac_jmbg", "JMBG podnosioca"),
+  F("Prijem", "podnosilac_lk", "Broj lične karte podnosioca"),
+  F("Prijem", "podnosilac_telefon", "Telefon podnosioca"),
+  F("Prijem", "podnosilac_email", "E-pošta podnosioca"),
+  F("Prijem", "placa_smestaj_tekst", "Ko snosi troškove (kako piše u zahtevu)"),
+  F("Prijem", "cena_eur", "Cena smeštaja (EUR)"),
+  F("Prijem", "datum_otpusta", "Datum prestanka smeštaja"),
   F("Korisnik", "lbo", "LBO / broj zdravstvene kartice"),
   F("Korisnik", "izabrani_lekar", "Izabrani lekar"),
   F("Smeštaj", "broj_dosijea", "Broj dosijea"),
@@ -166,6 +194,11 @@ function placementText(p: { placementBasis?: string; contractNumber?: string; co
 
 /** Svi podaci korisnika za šablone: polja (tekst) i tabele (nizovi redova). Prazno polje je "". */
 export async function buildMergeData(patientId: string, author?: { name: string; lastName: string } | null) {
+  // Poslednji dokument svake vrste iz obrazaca (zaključen ima prednost, pa najnoviji)
+  const latest = (type: string) => SocialDocument.findOne({ patient: patientId, type }).sort({ status: -1, date: -1, createdAt: -1 }).lean();
+  const [intakeDoc, anamnesisDoc, assessmentDoc, scaleDoc, planDoc, reviewDoc] = await Promise.all(
+    ["intake", "anamnesis", "assessment", "support_scale", "plan", "plan_review"].map(latest)
+  );
   const [patient, profile, plan, assessment, notes, settings] = await Promise.all([
     Patient.findById(patientId).lean(),
     SocialProfile.findOne({ patient: patientId }).populate<{ assignedStaff: { name: string; lastName: string } | null }>("assignedStaff", "name lastName").lean(),
@@ -253,8 +286,97 @@ export async function buildMergeData(patientId: string, author?: { name: string;
     socijalni_radnik: author ? `${author.name} ${author.lastName}` : "",
   };
 
+  // ── Obrasci postupka smeštaja ──
+  const a = p.applicant ?? ({} as NonNullable<typeof p.applicant>);
+  const self = a.kind === "self";
+  const parent = p.parentName ?? "";
+  const docSections = (doc: { sections?: unknown } | null | undefined) => (doc?.sections ?? {}) as Record<string, string>;
+  const sectionFields = (prefix: string, doc: { sections?: unknown } | null | undefined) =>
+    Object.fromEntries(Object.entries(docSections(doc)).map(([k, v]) => [`${prefix}_${k}`, v ?? ""]));
+  const scaleScores = (scaleDoc?.scale ?? {}) as unknown as ScaleScores;
+  const roman = (n: number) => ["", "I", "II", "III", "IV"][n] ?? "";
+  const spouse = p.spouse;
+  const trustee = p.trustee;
+  const contract = p.contract;
+  const signerName = self ? `${patient.name} ${patient.lastName}` : a.name ?? "";
+
+  Object.assign(fields, {
+    prezime_ime: `${patient.lastName} ${patient.name}`,
+    prezime_roditelj_ime: parent ? `${patient.lastName} (${parent}) ${patient.name}` : `${patient.lastName} ${patient.name}`,
+    prezime_ime_devojacko: p.maidenName ? `${patient.lastName} ${patient.name}, rođ. ${p.maidenName}` : `${patient.lastName} ${patient.name}`,
+    godina_rodjenja: birth ? `${birth.getUTCFullYear()}.` : "",
+    prezime_pre_braka: p.maidenName ?? "",
+    otac: p.fatherName ?? "",
+    majka: join(p.motherName, p.motherMaidenName ? `rođ. ${p.motherMaidenName}` : ""),
+    bracni_drug: join(spouse?.name, spouse?.maidenName ? `rođ. ${spouse.maidenName}` : "", spouse?.address),
+    nacionalnost: p.nationality ?? "",
+    veroispovest: p.religion ?? "",
+    socijalni_status: p.socialStatus ?? "",
+    osiguranje_osnov: p.insuranceBasis ?? "",
+    imovina: p.property ?? "",
+    telefon: p.phone ?? "",
+    // Obrazac 4.1: adresa i telefon korisnika u prvom redu, pa srodnici
+    korisnik_kontakt: join(`${patient.name} ${patient.lastName}`, patient.address, p.phone),
+    email: p.email ?? "",
+    viber: p.messenger ?? "",
+    dijagnoza: p.diagnosis ?? "",
+    mesto_dolaska: p.municipality || patient.address || "",
+    datum_zahteva: fmtDay(p.requestDate),
+    datum_otpusta: fmtDay(patient.dischargeDate),
+    podnosilac: signerName,
+    // Ugovor ima posebno ime i prezime obveznika: prva reč je ime, ostalo prezime
+    podnosilac_ime: signerName.trim().split(/\s+/)[0] ?? "",
+    podnosilac_prezime: signerName.trim().split(/\s+/).slice(1).join(" "),
+    ugovor_datum: fmtDay(p.contractDate) || fmtDay(new Date()),
+    podnosilac_srodstvo: self ? "" : a.relation ?? "",
+    podnosilac_adresa: self ? patient.address ?? "" : a.address ?? "",
+    podnosilac_jmbg: self ? p.jmbg ?? "" : a.jmbg ?? "",
+    podnosilac_lk: self ? p.idCardNumber ?? "" : a.idCardNumber ?? "",
+    podnosilac_email: self ? p.email ?? "" : a.email ?? "",
+    podnosilac_telefon: self ? p.phone ?? "" : a.phone ?? "",
+    podnosilac_viber: self ? p.messenger ?? "" : a.messenger ?? "",
+    placa_smestaj_tekst: p.payerNote || (LABELS.payer![p.payer ?? ""] ?? ""),
+    poslovna_sposobnost_tekst: join(LABELS.legal![p.legalCapacity ?? ""], g?.authority, g?.decisionNumber ? `br. ${g.decisionNumber}` : "", fmtDay(g?.decisionDate)),
+    staratelj_tekst: join(g?.name, g?.relation, g?.phone),
+    poverenik: trustee?.name ?? "",
+    poverenik_adresa: trustee?.address ?? "",
+    poverenik_lk: trustee?.idCardNumber ?? "",
+    poverenik_telefon: trustee?.phone ?? "",
+    cena_eur: contract?.priceEUR != null ? String(contract.priceEUR).replace(".", ",") : "",
+    racun_korisnika: contract?.bankAccount ?? "",
+    stepen: roman(p.supportLevel ?? 0),
+    // Stručni dokumenti (obrasci 2, 4, 10–13): datumi i delovi teksta poslednjeg dokumenta
+    pp_datum: fmtDay(intakeDoc?.date),
+    an_datum: fmtDay(anamnesisDoc?.date),
+    pr_datum: fmtDay(assessmentDoc?.date),
+    sk_datum: fmtDay(scaleDoc?.date),
+    sk_ponovna: fmtDay(scaleDoc?.nextReview),
+    ip_datum: fmtDay(planDoc?.date),
+    ip_evaluacija: fmtDay(planDoc?.nextReview),
+    pg_datum: fmtDay(reviewDoc?.date),
+    ...sectionFields("pp", intakeDoc),
+    ...sectionFields("an", anamnesisDoc),
+    ...sectionFields("pr", assessmentDoc),
+    ...sectionFields("sk", scaleDoc),
+    ...sectionFields("ip", planDoc),
+    ...sectionFields("pg", reviewDoc),
+    ...scaleFields(scaleScores, roman),
+    ...genderWords("k", p.sex),
+    ...genderWords("p", self ? p.sex : a.sex),
+  });
+
+  // Oznake za izbor u obrascu (soba, kategorija, osnov prestanka) — {#soba_1}…{/soba_1}
+  const flags: Record<string, boolean> = {
+    podnosilac_korisnik: self,
+    podnosilac_srodnik: !self && !!a.kind,
+  };
+  for (const [i, room] of ["single", "double", "any"].entries()) flags[`soba_${i + 1}`] = contract?.roomType === room;
+  for (let i = 1; i <= 10; i++) flags[`kat_${i}`] = (contract?.categories ?? []).includes(i);
+  for (let i = 1; i <= 7; i++) flags[`prestanak_${i}`] = p.dischargeReason === i;
+
   const lists = {
     kontakti: contacts.map((c) => ({
+      kontakt_red: join(c.name, c.relation, c.address, c.phone),
       kontakt_ime: c.name,
       kontakt_srodstvo: c.relation ?? "",
       kontakt_telefon: c.phone ?? "",
@@ -272,8 +394,14 @@ export async function buildMergeData(patientId: string, author?: { name: string;
       rok: fmtDay(goal.due),
     })),
     // Beleška je trenutak (ne kalendarski dan): datum po vremenskoj zoni doma
-    beleske: notes.map((n) => ({ beleska_datum: fmtDay(calendarDayInZone(new Date(n.date))), beleska_naslov: n.title ?? "", beleska: n.text })),
+    beleske: notes.map((n) => ({
+      beleska_datum: fmtDay(calendarDayInZone(new Date(n.date))),
+      beleska_naslov: n.title ?? "",
+      beleska: n.text,
+      // List praćenja: naslov i tekst u jednoj ćeliji
+      beleska_tekst: n.title ? `${n.title}: ${n.text}` : n.text,
+    })),
   };
 
-  return { fields, lists };
+  return { fields, lists, flags };
 }
