@@ -4,8 +4,9 @@ import mongoose from "mongoose";
 import Patient from "../models/Patient.js";
 import User from "../models/User.js";
 import AuditLog from "../models/AuditLog.js";
-import SocialProfile, { LEGAL_CAPACITY, MARITAL_STATUS, PAYERS, PENSION_TYPES, PLACEMENT_BASIS, SEX } from "../models/SocialProfile.js";
-import SocialDocument, { DOC_SECTIONS, DOC_TYPES, type DocType } from "../models/SocialDocument.js";
+import SocialProfile, { APPLICANT_KINDS, DISCHARGE_REASONS, LEGAL_CAPACITY, MARITAL_STATUS, PAYERS, PENSION_TYPES, PLACEMENT_BASIS, ROOM_TYPES, SEX, USER_CATEGORIES } from "../models/SocialProfile.js";
+import SocialDocument, { DOC_SECTIONS, DOC_TYPES, LEGACY_SECTIONS, type DocType } from "../models/SocialDocument.js";
+import { SCALE_ITEMS, SCALE_MAX, SCALE_MIN, scaleSummary } from "../services/social/supportScale.js";
 import { isManagerRole } from "../middleware/requireRole.js";
 import { addDays, normalizeStoredDay, parseCalendarDay } from "../utils/dateUtils.js";
 import { errorMessage, httpError, statusOf } from "../utils/errors.js";
@@ -47,13 +48,64 @@ async function patientOr404(id: unknown) {
 
 type Parser = (v: unknown) => unknown;
 const text = (max: number): Parser => (v) => str(v, max);
+const jmbgOf = (label: string) => (v: unknown) => {
+  const jmbg = str(v, 20).replace(/\s/g, "");
+  if (jmbg && !isValidJmbg(jmbg)) throw httpError(400, `${label} nije ispravan (13 cifara, proverite kontrolnu cifru).`);
+  return jmbg;
+};
 const PROFILE_FIELDS: Record<string, Parser> = {
-  jmbg: (v) => {
-    const jmbg = str(v, 20).replace(/\s/g, "");
-    if (jmbg && !isValidJmbg(jmbg)) throw httpError(400, "JMBG nije ispravan (13 cifara, proverite kontrolnu cifru).");
-    return jmbg;
-  },
+  jmbg: jmbgOf("JMBG"),
   parentName: text(120),
+  maidenName: text(80),
+  fatherName: text(120),
+  motherName: text(120),
+  motherMaidenName: text(80),
+  spouse: (v) => {
+    const s = obj(v);
+    return { name: str(s.name, 120), maidenName: str(s.maidenName, 80), address: str(s.address, 200) };
+  },
+  phone: text(60),
+  email: text(120),
+  messenger: text(60),
+  payerNote: text(200),
+  socialStatus: text(160),
+  insuranceBasis: text(160),
+  property: text(500),
+  diagnosis: text(300),
+  requestDate: (v) => day(v, "Datum zahteva"),
+  applicant: (v) => {
+    const a = obj(v);
+    return {
+      kind: oneOf(a.kind ?? "", APPLICANT_KINDS, "Podnosilac zahteva"),
+      name: str(a.name, 120),
+      relation: str(a.relation, 60),
+      sex: oneOf(a.sex ?? "", SEX, "Pol podnosioca"),
+      address: str(a.address, 200),
+      jmbg: jmbgOf("JMBG podnosioca")(a.jmbg),
+      idCardNumber: str(a.idCardNumber, 30),
+      email: str(a.email, 120),
+      phone: str(a.phone, 60),
+      messenger: str(a.messenger, 60),
+    };
+  },
+  trustee: (v) => {
+    const t = obj(v);
+    return { name: str(t.name, 120), address: str(t.address, 200), idCardNumber: str(t.idCardNumber, 30), phone: str(t.phone, 60) };
+  },
+  contract: (v) => {
+    const c = obj(v);
+    const price = c.priceEUR === null || c.priceEUR === undefined || c.priceEUR === "" ? null : Number(c.priceEUR);
+    if (price !== null && !(Number.isFinite(price) && price >= 0)) throw httpError(400, "Cena smeštaja mora biti 0 ili veća.");
+    const categories = [...new Set((Array.isArray(c.categories) ? c.categories : []).map(Number))]
+      .filter((n) => Number.isInteger(n) && n >= 1 && n <= USER_CATEGORIES)
+      .sort((a, b) => a - b);
+    return { roomType: oneOf(c.roomType ?? "", ROOM_TYPES, "Kategorija sobe"), categories, priceEUR: price === null ? null : Math.round(price * 100) / 100, bankAccount: str(c.bankAccount, 60) };
+  },
+  dischargeReason: (v) => {
+    const n = Number(v ?? 0);
+    if (!Number.isInteger(n) || n < 0 || n > DISCHARGE_REASONS) throw httpError(400, "Osnov prestanka smeštaja: nepoznata vrednost.");
+    return n;
+  },
   birthPlace: text(120),
   sex: (v) => oneOf(v ?? "", SEX, "Pol"),
   citizenship: text(60),
@@ -285,7 +337,8 @@ export const getMergeData = async (req: Request, res: Response) => {
   try {
     const patient = await patientOr404(param(req, "patientId"));
     const data = await buildMergeData(String(patient._id), req.user);
-    await audit(req, "template.fill", patient._id, [], typeof req.query.template === "string" ? str(req.query.template, 120) : "");
+    // U zapisnik ide samo stvarna popuna dokumenta (sa nazivom), ne i provera statusa obrazaca
+    if (typeof req.query.template === "string" && req.query.template) await audit(req, "template.fill", patient._id, [], str(req.query.template, 120));
     res.json({ success: true, ...data });
   } catch (err) {
     fail(res, err);
@@ -301,9 +354,26 @@ function parseDocument(type: DocType, b: Record<string, unknown>) {
   const date = day(b.date, "Datum") ?? day(new Date(), "Datum")!;
   const raw = obj(b.sections);
   const sections: Record<string, string> = {};
-  for (const key of DOC_SECTIONS[type]) {
+  // Raniji delovi (stari oblik dokumenta) se čuvaju dok se nacrt menja — ništa se ne gubi
+  for (const key of new Set([...DOC_SECTIONS[type], ...LEGACY_SECTIONS[type]])) {
     const value = str(raw[key], 10000);
     if (value) sections[key] = value;
+  }
+  const scale: Record<string, { now: number | null; expected: number | null }> = {};
+  if (type === "support_scale") {
+    const rawScale = obj(b.scale);
+    const score = (v: unknown, label: string) => {
+      if (v === null || v === undefined || v === "") return null;
+      const n = Number(v);
+      if (!Number.isInteger(n) || n < SCALE_MIN || n > SCALE_MAX) throw httpError(400, `${label}: ocena je od ${SCALE_MIN} do ${SCALE_MAX}.`);
+      return n;
+    };
+    for (const key of SCALE_ITEMS) {
+      const row = obj(rawScale[key]);
+      const now = score(row.now, "Stanje na prijemu");
+      const expected = score(row.expected, "Očekivani ishod");
+      if (now !== null || expected !== null) scale[key] = { now, expected };
+    }
   }
   const level = Number(b.supportLevel ?? 0);
   if (!Number.isInteger(level) || level < 0 || level > 4) throw httpError(400, "Stepen podrške je od I do IV.");
@@ -320,12 +390,15 @@ function parseDocument(type: DocType, b: Record<string, unknown>) {
       status: oneOf(g.status ?? "", ["", "achieved", "partial", "not_achieved"] as const, "Ishod cilja"),
     }));
   const isPlan = type === "plan" || type === "plan_review";
-  const nextReview = isPlan ? day(b.nextReview, "Rok za ponovni pregled") : null;
+  // Plan: planirani datum evaluacije; skala: datum ponovne procene
+  const nextReview = isPlan || type === "support_scale" ? day(b.nextReview, type === "support_scale" ? "Datum ponovne procene" : "Rok za ponovni pregled") : null;
   if (nextReview && nextReview < date) throw httpError(400, "Rok za ponovni pregled je pre datuma dokumenta.");
   return {
     date,
     sections,
-    supportLevel: type === "assessment" || type === "reassessment" ? level : 0,
+    // Skala: stepen se računa iz ocena (ne šalje se); raniji oblik procene: kako je unet
+    supportLevel: type === "support_scale" ? scaleSummary(scale).level : type === "assessment" || type === "reassessment" ? level : 0,
+    scale,
     participants: str(b.participants, 1000),
     goals: isPlan ? goals : [],
     nextReview,
@@ -386,11 +459,13 @@ export const updateDocument = async (req: Request, res: Response) => {
 export const finalizeDocument = async (req: Request, res: Response) => {
   try {
     const doc = await editableDoc(req);
-    if (doc.type === "plan" && doc.goals.length === 0) throw httpError(400, "Individualni plan mora imati bar jedan cilj.");
+    const sections = doc.sections as unknown as Map<string, string>;
+    if (doc.type === "plan" && doc.goals.length === 0 && !sections.get("goals")?.trim()) throw httpError(400, "Individualni plan mora imati ciljeve.");
+    if (doc.type === "support_scale" && doc.supportLevel === 0) throw httpError(400, "Unesite ocene stanja na prijemu da bi se odredio stepen podrške.");
     if (doc.type === "plan" && !doc.nextReview) throw httpError(400, "Unesite rok za ponovni pregled plana.");
     doc.set({ status: "final", finalizedBy: req.user._id, finalizedAt: new Date() });
     await doc.save();
-    if ((doc.type === "assessment" || doc.type === "reassessment") && doc.supportLevel > 0) {
+    if ((doc.type === "assessment" || doc.type === "reassessment" || doc.type === "support_scale") && doc.supportLevel > 0) {
       await SocialProfile.findOneAndUpdate(
         { patient: doc.patient },
         { $set: { supportLevel: doc.supportLevel, updatedBy: req.user._id }, $setOnInsert: { patient: doc.patient } },

@@ -1,20 +1,39 @@
 import mongoose, { type InferSchemaType } from "mongoose";
 
 // Stručni dokumenti socijalnog radnika (Pravilnik o bližim uslovima i standardima za pružanje
-// usluga socijalne zaštite): prijemna procena (čl. 12), procena (čl. 13–15), individualni plan
-// usluge (čl. 16), ponovni pregled plana (čl. 17) i ponovna procena.
+// usluga socijalne zaštite), sa delovima TAČNO kao na obrascima doma:
+//  intake        — obrazac 2, prijemna procena (čl. 12)
+//  anamnesis     — obrazac 4, list o socijalno-anamnestičkim podacima
+//  assessment    — obrazac 10, procena (čl. 13)
+//  support_scale — obrazac 11, određivanje stepena potrebne podrške (čl. 14)
+//  plan          — obrazac 12, individualni plan usluge (čl. 16)
+//  plan_review   — obrazac 13, ponovni pregled (čl. 17)
+//  reassessment  — raniji oblik ponovne procene (samo postojeći zapisi; nova = nova procena)
 // Nacrt se menja; zaključen dokument je zapis i više se ne menja (nova procena = novi dokument).
 
-export const DOC_TYPES = ["intake", "assessment", "reassessment", "plan", "plan_review"] as const;
+export const DOC_TYPES = ["intake", "anamnesis", "assessment", "support_scale", "plan", "plan_review", "reassessment"] as const;
 export type DocType = (typeof DOC_TYPES)[number];
 
-/** Delovi teksta po vrsti dokumenta (ključevi su isti u aplikaciji i u budućim šablonima) */
+/** Delovi teksta po vrsti dokumenta (isti ključevi u aplikaciji i u Word obrascima) */
 export const DOC_SECTIONS: Record<DocType, readonly string[]> = {
-  intake: ["request", "userAttitude", "eligibility", "capacity", "priority", "alternatives", "outcome"],
-  assessment: ["socialHistory", "health", "selfCare", "mental", "communication", "socialTies", "interests", "strengths", "risks", "needs", "culture", "userView", "conclusion"],
+  intake: ["attitude", "eligibility", "priority", "abilities", "capacity"],
+  anamnesis: ["mobility", "selfCare", "communication", "chronicIllness", "healthOther", "family", "familyOther", "requestedBy", "reasons", "userAttitude", "relativesAttitude", "circumstances", "commission"],
+  assessment: ["needs", "priorityNeeds", "strengths", "risks", "abilities", "interests"],
+  support_scale: ["duration", "otherProblems", "observations"],
+  plan: ["otherProblems", "goals", "activities", "outcomes", "timeframe", "evaluationMethod", "responsible", "implementers"],
+  plan_review: ["otherProblems", "selfCare", "communication", "social", "family", "satisfaction", "progress", "adjustments"],
   reassessment: ["changes", "socialHistory", "health", "selfCare", "mental", "socialTies", "risks", "needs", "userView", "conclusion"],
+};
+
+/** Delovi iz ranijeg oblika dokumenata — čuvaju se i prikazuju (samo za čitanje), ne gube se */
+export const LEGACY_SECTIONS: Record<DocType, readonly string[]> = {
+  intake: ["request", "userAttitude", "outcome", "alternatives"],
+  anamnesis: [],
+  assessment: ["socialHistory", "health", "selfCare", "mental", "communication", "socialTies", "culture", "userView", "conclusion", "needs", "strengths", "risks", "interests"],
+  support_scale: [],
   plan: ["summary", "adaptation"],
-  plan_review: ["progress", "changes", "conclusion"],
+  plan_review: ["changes", "conclusion"],
+  reassessment: [],
 };
 
 const goalSchema = new mongoose.Schema(
@@ -41,6 +60,8 @@ const socialDocumentSchema = new mongoose.Schema(
     sections: { type: Map, of: String, default: {} },
     /** Procene: stepen podrške I–IV (čl. 15); 0 = nije određen */
     supportLevel: { type: Number, min: 0, max: 4, default: 0 },
+    /** Skala podrške (obrazac 11): ocena stanja na prijemu i očekivanog ishoda po stavci, 1–4 */
+    scale: { type: Map, of: new mongoose.Schema({ now: { type: Number, default: null }, expected: { type: Number, default: null } }, { _id: false }), default: {} },
     /** Ko je učestvovao (korisnik, porodica, staratelj, voditelj slučaja, zaposleni...) */
     participants: { type: String, trim: true, default: "", maxlength: 1000 },
     /** Individualni plan: ciljevi, ishodi, aktivnosti, odgovorni, rok */
