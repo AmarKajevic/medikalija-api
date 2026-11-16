@@ -8,6 +8,7 @@ import SocialNote from "../../models/SocialNote.js";
 import GlobalSetting, { DEFAULT_FACILITY } from "../../models/GlobalSetting.js";
 import { calendarDayInZone, normalizeStoredDay } from "../../utils/dateUtils.js";
 import { genderWords, scaleFields } from "./formFields.js";
+import { addressLocative, declinePerson, declinePlace } from "./declension.js";
 import type { ScaleScores } from "./supportScale.js";
 
 export interface MergeFieldDef {
@@ -299,6 +300,8 @@ export async function buildMergeData(patientId: string, author?: { name: string;
   const trustee = p.trustee;
   const contract = p.contract;
   const signerName = self ? `${patient.name} ${patient.lastName}` : a.name ?? "";
+  // Mesto odakle dolazi: opština, inače mesto iz adrese (prvi deo pre zareza)
+  const arrivalPlace = (p.municipality || (patient.address ?? "").split(",")[0] || "").trim();
 
   Object.assign(fields, {
     prezime_ime: `${patient.lastName} ${patient.name}`,
@@ -320,7 +323,14 @@ export async function buildMergeData(patientId: string, author?: { name: string;
     email: p.email ?? "",
     viber: p.messenger ?? "",
     dijagnoza: p.diagnosis ?? "",
-    mesto_dolaska: p.municipality || patient.address || "",
+    mesto_dolaska: arrivalPlace,
+    // Padeži za rečenice u obrascima: "moju Milicu Jovanović", "Korisnici Milici Jovanović",
+    // "lične stvari korisnika Milice Jovanović", "iz Beograda", "živi u Beogradu, …"
+    ime_prezime_gen: declinePerson(patient.name, patient.lastName, p.sex, "gen"),
+    ime_prezime_dat: declinePerson(patient.name, patient.lastName, p.sex, "dat"),
+    ime_prezime_akuz: declinePerson(patient.name, patient.lastName, p.sex, "acc"),
+    mesto_dolaska_gen: arrivalPlace ? declinePlace(arrivalPlace, "gen") : "",
+    adresa_lok: patient.address ? addressLocative(patient.address) : "",
     datum_zahteva: fmtDay(p.requestDate),
     datum_otpusta: fmtDay(patient.dischargeDate),
     podnosilac: signerName,

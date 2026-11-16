@@ -103,6 +103,9 @@ describe("karton: podaci iz obrazaca", () => {
     const data = (await as(social).get(`/api/social/merge-data/${patient._id}`)).body;
     const f = data.fields;
     assert.equal(f.prezime_roditelj_ime, "Jovanović (Marko) Milica");
+    assert.equal(f.ime_prezime_akuz, "Milicu Jovanović");
+    assert.equal(f.ime_prezime_dat, "Milici Jovanović");
+    assert.equal(f.ime_prezime_gen, "Milice Jovanović");
     assert.equal(f.godina_rodjenja, "1947.");
     assert.equal(f.datum_zahteva, "01.09.2026.");
     assert.equal(f.podnosilac, "Stevan Jovanović");
