@@ -12,6 +12,8 @@ export const PAYERS = ["", "resident", "family", "csr", "mixed", "other"] as con
 export const PENSION_TYPES = ["", "old_age", "family", "disability", "foreign", "none", "other"] as const;
 /** Ko podnosi zahtev i potpisuje izjave/ugovor: sam korisnik ili srodnik / staratelj / drugo lice */
 export const APPLICANT_KINDS = ["", "self", "relative", "guardian", "other"] as const;
+/** Obveznik ugovora: "" = isti kao podnosilac zahteva, "other" = drugo lice, "none" = nema (korisnik sam) */
+export const OBLIGOR_SOURCES = ["", "other", "none"] as const;
 /** Ugovor čl. 2: kategorija sobe */
 export const ROOM_TYPES = ["", "single", "double", "any"] as const;
 /** Ugovor čl. 3: kategorije korisnika (1–10) */
@@ -94,6 +96,18 @@ const socialProfileSchema = new mongoose.Schema(
       name: str(120),
       relation: str(60),
       sex: { type: String, enum: SEX, default: "" },
+      address: str(200),
+      jmbg: str(13),
+      idCardNumber: str(30),
+      email: str(120),
+      phone: str(60),
+      messenger: str(60),
+    },
+    /** Obveznik ugovora (srodnik ili drugo lice koje potpisuje ugovor i plaća smeštaj) */
+    obligor: {
+      source: { type: String, enum: OBLIGOR_SOURCES, default: "" },
+      name: str(120),
+      relation: str(60),
       address: str(200),
       jmbg: str(13),
       idCardNumber: str(30),
