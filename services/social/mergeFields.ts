@@ -65,6 +65,12 @@ export const MERGE_FIELDS: MergeFieldDef[] = [
   F("Prijem", "podnosilac_lk", "Broj lične karte podnosioca"),
   F("Prijem", "podnosilac_telefon", "Telefon podnosioca"),
   F("Prijem", "podnosilac_email", "E-pošta podnosioca"),
+  F("Ugovor", "obveznik", "Obveznik ugovora — ime i prezime"),
+  F("Ugovor", "obveznik_adresa", "Adresa obveznika"),
+  F("Ugovor", "obveznik_jmbg", "JMBG obveznika"),
+  F("Ugovor", "obveznik_lk", "Broj lične karte obveznika"),
+  F("Ugovor", "obveznik_telefon", "Telefon obveznika"),
+  F("Ugovor", "obveznik_email", "E-pošta obveznika"),
   F("Prijem", "placa_smestaj_tekst", "Ko snosi troškove (kako piše u zahtevu)"),
   F("Prijem", "cena_eur", "Cena smeštaja (EUR)"),
   F("Prijem", "datum_otpusta", "Datum prestanka smeštaja"),
@@ -298,6 +304,16 @@ export async function buildMergeData(patientId: string, author?: { name: string;
   const roman = (n: number) => ["", "I", "II", "III", "IV"][n] ?? "";
   const spouse = p.spouse;
   const trustee = p.trustee;
+  // Obveznik ugovora: isti kao podnosilac (srodnik/staratelj/drugo lice), drugo lice ili nema ga
+  const o = p.obligor;
+  const obligor =
+    o?.source === "none"
+      ? null
+      : o?.source === "other"
+        ? { name: o.name ?? "", address: o.address ?? "", jmbg: o.jmbg ?? "", lk: o.idCardNumber ?? "", email: o.email ?? "", phone: o.phone ?? "", viber: o.messenger ?? "" }
+        : !self && a.kind
+          ? { name: a.name ?? "", address: a.address ?? "", jmbg: a.jmbg ?? "", lk: a.idCardNumber ?? "", email: a.email ?? "", phone: a.phone ?? "", viber: a.messenger ?? "" }
+          : null;
   const contract = p.contract;
   const signerName = self ? `${patient.name} ${patient.lastName}` : a.name ?? "";
   // Mesto odakle dolazi: opština, inače mesto iz adrese (prvi deo pre zareza)
@@ -348,6 +364,15 @@ export async function buildMergeData(patientId: string, author?: { name: string;
     podnosilac_email: self ? p.email ?? "" : a.email ?? "",
     podnosilac_telefon: self ? p.phone ?? "" : a.phone ?? "",
     podnosilac_viber: self ? p.messenger ?? "" : a.messenger ?? "",
+    obveznik: obligor?.name ?? "",
+    obveznik_ime: (obligor?.name ?? "").trim().split(/\s+/)[0] ?? "",
+    obveznik_prezime: (obligor?.name ?? "").trim().split(/\s+/).slice(1).join(" "),
+    obveznik_adresa: obligor?.address ?? "",
+    obveznik_jmbg: obligor?.jmbg ?? "",
+    obveznik_lk: obligor?.lk ?? "",
+    obveznik_email: obligor?.email ?? "",
+    obveznik_telefon: obligor?.phone ?? "",
+    obveznik_viber: obligor?.viber ?? "",
     placa_smestaj_tekst: p.payerNote || (LABELS.payer![p.payer ?? ""] ?? ""),
     poslovna_sposobnost_tekst: join(LABELS.legal![p.legalCapacity ?? ""], g?.authority, g?.decisionNumber ? `br. ${g.decisionNumber}` : "", fmtDay(g?.decisionDate)),
     staratelj_tekst: join(g?.name, g?.relation, g?.phone),
@@ -382,6 +407,8 @@ export async function buildMergeData(patientId: string, author?: { name: string;
   const flags: Record<string, boolean> = {
     podnosilac_korisnik: self,
     podnosilac_srodnik: !self && !!a.kind,
+    // Ugovor: kolona "Obveznik ugovora" i potpis "2.Srodnik" se popunjavaju samo kad obveznik postoji
+    obveznik_postoji: !!obligor,
   };
   for (const [i, room] of ["single", "double", "any"].entries()) flags[`soba_${i + 1}`] = contract?.roomType === room;
   for (let i = 1; i <= 10; i++) flags[`kat_${i}`] = (contract?.categories ?? []).includes(i);

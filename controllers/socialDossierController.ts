@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 import Patient from "../models/Patient.js";
 import User from "../models/User.js";
 import AuditLog from "../models/AuditLog.js";
-import SocialProfile, { APPLICANT_KINDS, DISCHARGE_REASONS, LEGAL_CAPACITY, MARITAL_STATUS, PAYERS, PENSION_TYPES, PLACEMENT_BASIS, ROOM_TYPES, SEX, USER_CATEGORIES } from "../models/SocialProfile.js";
+import SocialProfile, { APPLICANT_KINDS, DISCHARGE_REASONS, OBLIGOR_SOURCES, LEGAL_CAPACITY, MARITAL_STATUS, PAYERS, PENSION_TYPES, PLACEMENT_BASIS, ROOM_TYPES, SEX, USER_CATEGORIES } from "../models/SocialProfile.js";
 import SocialDocument, { DOC_SECTIONS, DOC_TYPES, LEGACY_SECTIONS, type DocType } from "../models/SocialDocument.js";
 import { SCALE_ITEMS, SCALE_MAX, SCALE_MIN, scaleSummary } from "../services/social/supportScale.js";
 import { isManagerRole } from "../middleware/requireRole.js";
@@ -86,6 +86,20 @@ const PROFILE_FIELDS: Record<string, Parser> = {
       email: str(a.email, 120),
       phone: str(a.phone, 60),
       messenger: str(a.messenger, 60),
+    };
+  },
+  obligor: (v) => {
+    const o = obj(v);
+    return {
+      source: oneOf(o.source ?? "", OBLIGOR_SOURCES, "Obveznik ugovora"),
+      name: str(o.name, 120),
+      relation: str(o.relation, 60),
+      address: str(o.address, 200),
+      jmbg: jmbgOf("JMBG obveznika")(o.jmbg),
+      idCardNumber: str(o.idCardNumber, 30),
+      email: str(o.email, 120),
+      phone: str(o.phone, 60),
+      messenger: str(o.messenger, 60),
     };
   },
   trustee: (v) => {

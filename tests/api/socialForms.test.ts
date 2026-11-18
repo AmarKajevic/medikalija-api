@@ -135,6 +135,45 @@ describe("karton: podaci iz obrazaca", () => {
     assert.equal(f.p_saglasan, "saglasna");
   });
 
+  test("obveznik ugovora: podnosilac, drugo lice ili nema obveznika", async () => {
+    const merge = async () => (await as(social).get(`/api/social/merge-data/${patient._id}`)).body;
+    const save = (profile: object) => as(social).patch(`/api/social/profile/${patient._id}`, { profile });
+
+    // Podrazumevano: obveznik je podnosilac (srodnik)
+    await save({ applicant: { kind: "relative", name: "Stevan Jovanović", idCardNumber: "012" } });
+    let d = await merge();
+    assert.equal(d.fields.obveznik, "Stevan Jovanović");
+    assert.equal(d.fields.obveznik_ime, "Stevan");
+    assert.equal(d.fields.obveznik_lk, "012");
+    assert.equal(d.flags.obveznik_postoji, true);
+
+    // Korisnik sam podnosi zahtev, a ugovor potpisuje ćerka kao obveznik
+    const res = await save({
+      applicant: { kind: "self" },
+      obligor: { source: "other", name: "Jelena Petrović", relation: "ćerka", address: "Novi Sad", jmbg: "0101980715001", idCardNumber: "555", phone: "064 1" },
+    });
+    assert.equal(res.status, 200, res.body.message);
+    d = await merge();
+    assert.equal(d.fields.podnosilac, "Milica Jovanović", "podnosilac ostaje korisnik");
+    assert.equal(d.fields.obveznik_prezime, "Petrović");
+    assert.equal(d.fields.obveznik_jmbg, "0101980715001");
+    assert.equal(d.fields.obveznik_adresa, "Novi Sad");
+    assert.equal(d.flags.obveznik_postoji, true);
+
+    // Bez obveznika: kolona u ugovoru ostaje prazna
+    await save({ obligor: { source: "none" } });
+    d = await merge();
+    assert.equal(d.fields.obveznik, "");
+    assert.equal(d.flags.obveznik_postoji, false);
+
+    // Korisnik podnosi zahtev, obveznik "isti kao podnosilac" → nema obveznika
+    await save({ obligor: { source: "" } });
+    assert.equal((await merge()).flags.obveznik_postoji, false);
+
+    assert.equal((await save({ obligor: { source: "x" } })).status, 400);
+    assert.equal((await save({ obligor: { source: "other", jmbg: "12" } })).status, 400);
+  });
+
   test("skala: ocene van 1–4 se odbijaju; zaključenje bez ocena nije moguće; sestra nema pristup", async () => {
     const bad = await as(social).post("/api/social/documents", { patientId: String(patient._id), type: "support_scale", scale: { toilet: { now: 7 } } });
     assert.equal(bad.status, 400);
