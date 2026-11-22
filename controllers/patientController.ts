@@ -340,4 +340,40 @@ const dischargePatient = async (req: Request, res: Response) => {
 
 
 
-export {getDuplicatePatients, removeDuplicatePatients, getPatients,addPatient, getPatient, updatePatient, deletePatient, dischargePatient}
+// Ponovni prijem otpuštenog korisnika (npr. dolazi svako leto): podaci iz kartona ostaju, raniji
+// boravak se čuva u istoriji, a dokumentacija i periodi specifikacija kreću od novog prijema.
+const readmitPatient = async (req: Request, res: Response) => {
+  try {
+    const admissionDay = parseCalendarDay(req.body?.admissionDate);
+    if (!admissionDay) return res.status(400).json({ success: false, message: "Unesite datum ponovnog prijema." });
+    const patient = await Patient.findById(param(req, "id"));
+    if (!patient) return res.status(404).json({ success: false, message: "Pacijent nije pronađen." });
+    const discharged = normalizeStoredDay(patient.dischargeDate);
+    if (!discharged) return res.status(409).json({ success: false, message: "Korisnik je već na smeštaju." });
+    if (admissionDay <= discharged) {
+      return res.status(400).json({ success: false, message: "Datum ponovnog prijema mora biti posle datuma otpusta." });
+    }
+
+    patient.previousStays.push({ admissionDate: patient.admissionDate, dischargeDate: discharged, readmittedAt: new Date() });
+    patient.admissionDate = admissionDay;
+    patient.set("dischargeDate", null);
+    await patient.save();
+
+    // Podaci koji važe samo za jedan boravak (zahtev, ugovor, osnov prestanka, datum lista 4)
+    // se brišu; lični podaci, porodica i kontakti ostaju.
+    await SocialProfile.updateOne(
+      { patient: patient._id },
+      { $set: { requestDate: null, contractDate: null, contractNumber: "", dischargeReason: 0, "socialHealth.date": null } }
+    );
+    await AuditLog.create({
+      action: "patient.readmit",
+      user: req.user._id,
+      summary: `Ponovni prijem ${patient.name} ${patient.lastName} (prethodni boravak do ${discharged.toISOString().slice(0, 10)})`,
+    });
+    return res.json({ success: true, message: "Korisnik je ponovo primljen.", patient });
+  } catch (err) {
+    return res.status(statusOf(err)).json({ success: false, message: errorMessage(err) });
+  }
+};
+
+export {getDuplicatePatients, removeDuplicatePatients, getPatients,addPatient, getPatient, updatePatient, deletePatient, dischargePatient, readmitPatient}

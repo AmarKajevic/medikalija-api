@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { readmissionStart } from "../services/patientStay.js";
 import Patient from "../models/Patient.js";
 import Specification from "../models/Specification.js"
 import {
@@ -437,7 +438,7 @@ const getFutureSpecificationPeriods = async (req: Request, res: Response) => {
     }
 
     const until = futureScheduleHorizon(patient.admissionDate);
-    const periods = buildSpecificationSchedule(patient.admissionDate, until, undefined, await Specification.find({ patientId, nonStandard: { $ne: true } }));
+    const periods = buildSpecificationSchedule(patient.admissionDate, until, undefined, await Specification.find({ patientId, nonStandard: { $ne: true } }), readmissionStart(patient));
 
     return res.status(200).json({
       success: true,

@@ -17,6 +17,19 @@ const PatientSchema = new mongoose.Schema({
         default: null
         },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    // Raniji boravci (korisnik otpušten pa ponovo primljen, npr. svako leto). Tekući boravak je
+    // admissionDate–dischargeDate; dokumentacija i periodi se vode za tekući boravak.
+    previousStays: {
+        type: [
+            {
+                _id: false,
+                admissionDate: { type: Date, required: true },
+                dischargeDate: { type: Date, required: true },
+                readmittedAt: { type: Date, default: null },
+            },
+        ],
+        default: [],
+    },
 
 
 },

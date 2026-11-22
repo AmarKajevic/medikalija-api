@@ -4,6 +4,7 @@ import { Types } from "mongoose";
 import type { HydratedDocument } from "mongoose";
 import type { SpecificationDoc } from "../models/Specification.js";
 import { httpError } from "../utils/errors.js";
+import { readmissionStart } from "./patientStay.js";
 
 type Id = Types.ObjectId | string;
 type PatientDoc = HydratedDocument<import("mongoose").InferSchemaType<typeof Patient.schema>>;
@@ -76,8 +77,15 @@ const dated = (specs: SpecificationDoc[]): DatedSpec[] =>
     .sort((a, b) => a.start.getTime() - b.start.getTime() || a.end.getTime() - b.end.getTime());
 
 /** Lanac od prijema (ili najranijeg zapisa) do `untilDay`; `skipped` = zapisi koji se preklapaju sa lancem */
-export function buildPeriodChain(admission: Date | null, specs: SpecificationDoc[], untilDay: Date): { periods: ChainPeriod[]; skipped: SpecificationDoc[] } {
-  const records = dated(specs);
+export function buildPeriodChain(
+  admission: Date | null,
+  specs: SpecificationDoc[],
+  untilDay: Date,
+  /** Ponovni prijem: lanac kreće od novog prijema, zapisi ranijih boravaka se ne računaju */
+  stayStart: Date | null = null
+): { periods: ChainPeriod[]; skipped: SpecificationDoc[] } {
+  const records = dated(specs).filter((x) => !stayStart || x.end >= stayStart);
+  if (stayStart) admission = stayStart;
   const first = records[0]?.start;
   let cursor = admission && first ? (first < admission ? first : admission) : (admission ?? first);
   const periods: ChainPeriod[] = [];
@@ -105,7 +113,7 @@ export function buildPeriodChain(admission: Date | null, specs: SpecificationDoc
 async function loadPeriodChain(patientId: Id, untilDay: Date, patientDoc?: PatientDoc | null) {
   const patient = patientDoc ?? (await Patient.findById(patientId));
   const specs = await Specification.find({ patientId, ...STANDARD });
-  return buildPeriodChain(normalizeStoredDay(patient?.admissionDate), specs, untilDay);
+  return buildPeriodChain(normalizeStoredDay(patient?.admissionDate), specs, untilDay, readmissionStart(patient));
 }
 
 // Vraća period koji je admin eksplicitno označio kao aktivan (isActive: true).
@@ -335,8 +343,8 @@ export async function getOrCreateActiveSpecification(patientId: Id, patientDoc: 
 // Svaki period ima tačno 30 kalendarskih dana; 29. februar u prestupnoj
 // godini je običan dan u periodu, pa se raspored nikad ne "pomera".
 // Raspored perioda do `untilDay` po lancu (postojeći zapisi pacijenta pomeraju ono što sledi)
-export function buildSpecificationSchedule(admissionDate: DayInput, untilDay: Date, currentDay: Date = today(), specs: SpecificationDoc[] = []) {
-  const { periods } = buildPeriodChain(normalizeStoredDay(admissionDate), specs, untilDay);
+export function buildSpecificationSchedule(admissionDate: DayInput, untilDay: Date, currentDay: Date = today(), specs: SpecificationDoc[] = [], stayStart: Date | null = null) {
+  const { periods } = buildPeriodChain(normalizeStoredDay(admissionDate), specs, untilDay, stayStart);
   return periods.map((p, i) => ({
     index: i + 1,
     startDate: p.startDate,
@@ -419,11 +427,12 @@ export async function listSelectablePeriods(patientId: Id): Promise<SelectablePe
   const activeEnd = normalizeStoredDay(active?.endDate);
   const until = activeEnd && activeEnd > day ? activeEnd : day;
   // Prvo do današnjeg/aktivnog, pa periodi unapred (lanac se produžava period po period)
-  let chain = buildPeriodChain(admission, specs, until);
+  const stayStart = readmissionStart(patient);
+  let chain = buildPeriodChain(admission, specs, until, stayStart);
   for (let i = 0; i < BILLING_PERIODS_AHEAD; i++) {
     const lastEnd = chain.periods[chain.periods.length - 1]?.endDate;
     if (!lastEnd) break;
-    chain = buildPeriodChain(admission, specs, addDays(lastEnd, 1));
+    chain = buildPeriodChain(admission, specs, addDays(lastEnd, 1), stayStart);
   }
   const { periods, skipped } = chain;
 

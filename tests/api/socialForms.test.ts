@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import request from "supertest";
 import app from "../../app.js";
 import SocialProfile from "../../models/SocialProfile.js";
+import Patient from "../../models/Patient.js";
 import { levelFor, scaleSummary, SCALE_ITEMS } from "../../services/social/supportScale.js";
 import { genderWords } from "../../services/social/formFields.js";
 import { authHeader, createPatient, createUser, DAY_MS, useTestDatabase, type UserDoc } from "../helpers/setup.js";
@@ -172,6 +173,36 @@ describe("karton: podaci iz obrazaca", () => {
 
     assert.equal((await save({ obligor: { source: "x" } })).status, 400);
     assert.equal((await save({ obligor: { source: "other", jmbg: "12" } })).status, 400);
+  });
+
+  test("socijalno-zdravstveni podaci (obrazac 4) iz kartona; posle ponovnog prijema važe samo novi dokumenti", async () => {
+    const save = (body: object) => as(social).patch(`/api/social/profile/${patient._id}`, body);
+    const res = await save({
+      profile: {
+        guardian: { name: "Petrović Ana", address: "Novi Sad" },
+        socialHealth: { date: "2026-09-05", mobility: "polupokretna", reasons: "potrebna nega", commission: "Saglasni." },
+      },
+    });
+    assert.equal(res.status, 200, res.body.message);
+    // Raniji list kao dokument dopunjuje samo ono čega nema u kartonu
+    await as(social).post("/api/social/documents", { patientId: String(patient._id), type: "anamnesis", date: "2026-09-01", sections: { mobility: "stari unos", family: "Ima sina." } });
+    let f = (await as(social).get(`/api/social/merge-data/${patient._id}`)).body.fields;
+    assert.equal(f.an_mobility, "polupokretna", "karton ima prednost");
+    assert.equal(f.an_family, "Ima sina.");
+    assert.equal(f.an_commission, "Saglasni.");
+    assert.equal(f.an_datum, "05.09.2026.");
+    assert.equal(f.staratelj_tekst, "Petrović Ana, Novi Sad");
+    assert.equal((await save({ profile: { socialHealth: { date: "nije datum" } } })).status, 400);
+
+    // Ponovni prijem: dokumenti i beleške ranijeg boravka se ne koriste
+    await as(social).post("/api/social/documents", { patientId: String(patient._id), type: "intake", date: "2025-06-01", sections: { attitude: "prošlo leto" } });
+    await Patient.updateOne(
+      { _id: patient._id },
+      { $set: { previousStays: [{ admissionDate: new Date("2025-06-01T00:00:00Z"), dischargeDate: new Date("2025-08-31T00:00:00Z") }] } }
+    );
+    f = (await as(social).get(`/api/social/merge-data/${patient._id}`)).body.fields;
+    assert.equal(f.pp_attitude ?? "", "", "prijemna procena iz ranijeg boravka se ne koristi");
+    assert.equal(f.an_family, "Ima sina.", "list iz tekućeg boravka ostaje");
   });
 
   test("skala: ocene van 1–4 se odbijaju; zaključenje bez ocena nije moguće; sestra nema pristup", async () => {
