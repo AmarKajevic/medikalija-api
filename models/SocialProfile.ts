@@ -115,6 +115,27 @@ const socialProfileSchema = new mongoose.Schema(
       phone: str(60),
       messenger: str(60),
     },
+    /**
+     * Socijalno-zdravstveni podaci (obrazac 4 — list o socijalno-anamnestičkim podacima, delovi II–V).
+     * Opšti podaci (deo I) su ostala polja kartona.
+     */
+    socialHealth: {
+      /** Datum lista ("U Beogradu, ___ godine"); prazno = datum prijema */
+      date: { type: Date, default: null },
+      mobility: str(2000),
+      selfCare: str(2000),
+      communication: str(2000),
+      chronicIllness: str(2000),
+      healthOther: str(2000),
+      family: str(2000),
+      familyOther: str(2000),
+      requestedBy: str(2000),
+      reasons: str(2000),
+      userAttitude: str(2000),
+      relativesAttitude: str(2000),
+      circumstances: str(2000),
+      commission: str(2000),
+    },
     /** Poverenik (ugovor čl. 11) */
     trustee: { name: str(120), address: str(200), idCardNumber: str(30), phone: str(60) },
     /** Ugovor o smeštaju */
@@ -133,6 +154,7 @@ const socialProfileSchema = new mongoose.Schema(
     guardian: {
       name: str(120),
       relation: str(60),
+      address: str(200),
       phone: str(60),
       decisionNumber: str(60),
       decisionDate: { type: Date, default: null },

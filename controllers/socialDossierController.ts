@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { currentStayFrom } from "../services/patientStay.js";
 import { assertUniquePatientName, patientNameKey } from "../services/patientIdentity.js";
 import mongoose from "mongoose";
 import Patient from "../models/Patient.js";
@@ -102,6 +103,25 @@ const PROFILE_FIELDS: Record<string, Parser> = {
       messenger: str(o.messenger, 60),
     };
   },
+  socialHealth: (v) => {
+    const h = obj(v);
+    return {
+      date: day(h.date, "Datum lista (obrazac 4)"),
+      mobility: str(h.mobility, 2000),
+      selfCare: str(h.selfCare, 2000),
+      communication: str(h.communication, 2000),
+      chronicIllness: str(h.chronicIllness, 2000),
+      healthOther: str(h.healthOther, 2000),
+      family: str(h.family, 2000),
+      familyOther: str(h.familyOther, 2000),
+      requestedBy: str(h.requestedBy, 2000),
+      reasons: str(h.reasons, 2000),
+      userAttitude: str(h.userAttitude, 2000),
+      relativesAttitude: str(h.relativesAttitude, 2000),
+      circumstances: str(h.circumstances, 2000),
+      commission: str(h.commission, 2000),
+    };
+  },
   trustee: (v) => {
     const t = obj(v);
     return { name: str(t.name, 120), address: str(t.address, 200), idCardNumber: str(t.idCardNumber, 30), phone: str(t.phone, 60) };
@@ -144,6 +164,7 @@ const PROFILE_FIELDS: Record<string, Parser> = {
     return {
       name: str(g.name, 120),
       relation: str(g.relation, 60),
+      address: str(g.address, 200),
       phone: str(g.phone, 60),
       decisionNumber: str(g.decisionNumber, 60),
       decisionDate: day(g.decisionDate, "Datum rešenja o starateljstvu"),
@@ -522,7 +543,7 @@ const addMonths = (d: Date, m: number) => {
 // GET /api/social/deadlines — sledeći korak za svakog korisnika na smeštaju
 export const listDeadlines = async (_req: Request, res: Response) => {
   try {
-    const patients = await Patient.find({ dischargeDate: null }).select("name lastName admissionDate").lean();
+    const patients = await Patient.find({ dischargeDate: null }).select("name lastName admissionDate previousStays").lean();
     const docs = await SocialDocument.find({ patient: { $in: patients.map((p) => p._id) }, status: "final" })
       .select("patient type date nextReview")
       .sort({ date: 1 })
@@ -535,7 +556,9 @@ export const listDeadlines = async (_req: Request, res: Response) => {
 
     const deadlines: Deadline[] = [];
     for (const p of patients) {
-      const list = byPatient.get(String(p._id)) ?? [];
+      // Posle ponovnog prijema važi samo dokumentacija tekućeg boravka
+      const from = currentStayFrom(p);
+      const list = (byPatient.get(String(p._id)) ?? []).filter((d) => !from || new Date(d.date) >= from);
       const patient = { _id: String(p._id), name: p.name, lastName: p.lastName };
       const assessments = list.filter((d) => d.type === "assessment" || d.type === "reassessment");
       const lastAssessment = assessments[assessments.length - 1];

@@ -113,6 +113,54 @@ describe("PATCH /api/patient/:id/discharge", () => {
   });
 });
 
+describe("PATCH /api/patient/:id/readmit (ponovni prijem)", () => {
+  const utc = (s: string) => new Date(`${s}T00:00:00Z`);
+
+  test("otpušten korisnik se ponovo prima: raniji boravak ide u istoriju, periodi kreću od novog prijema", async () => {
+    const { getActiveSpecification } = await import("../../services/getOrCreateActiveSpecification.js");
+    const SocialProfile = (await import("../../models/SocialProfile.js")).default;
+    const patient = await createPatient({ admissionDate: utc("2025-06-01"), dischargeDate: utc("2025-08-31") });
+    await Specification.create({ patientId: patient._id, startDate: utc("2025-08-01"), endDate: utc("2025-08-31") });
+    await SocialProfile.create({ patient: patient._id, requestDate: utc("2025-05-20"), dischargeReason: 6, fatherName: "Marko" });
+    const readmitDay = new Date(Date.now() - 40 * DAY_MS).toISOString().slice(0, 10);
+
+    const res = await request(app).patch(`/api/patient/${patient._id}/readmit`).set(authHeader(admin)).send({ admissionDate: readmitDay });
+    assert.equal(res.status, 200, res.body.message);
+    const p = must(await Patient.findById(patient._id));
+    assert.equal(p.dischargeDate, null);
+    assert.equal(p.admissionDate.toISOString().slice(0, 10), readmitDay);
+    assert.equal(p.previousStays.length, 1);
+    assert.equal(p.previousStays[0]!.dischargeDate.toISOString().slice(0, 10), "2025-08-31");
+
+    // Aktivan period je u novom boravku; za vreme odsustva se ne prave periodi
+    const active = must(await getActiveSpecification(patient._id));
+    assert.ok(active.startDate >= utc(readmitDay), "aktivan period počinje posle novog prijema");
+    const gap = await Specification.countDocuments({ patientId: patient._id, startDate: { $gt: utc("2025-08-31"), $lt: utc(readmitDay) } });
+    assert.equal(gap, 0, "nema perioda između boravaka");
+
+    // Podaci jednog boravka se brišu, lični podaci ostaju
+    const profile = must(await SocialProfile.findOne({ patient: patient._id }));
+    assert.equal(profile.requestDate, null);
+    assert.equal(profile.dischargeReason, 0);
+    assert.equal(profile.fatherName, "Marko");
+  });
+
+  test("socijalni radnik može da primi korisnika ponovo (kao i otpust)", async () => {
+    const social = await createUser("social-worker");
+    const out = await createPatient({ admissionDate: utc("2025-06-01"), dischargeDate: utc("2025-08-31") });
+    const res = await request(app).patch(`/api/patient/${out._id}/readmit`).set(authHeader(social)).send({ admissionDate: "2026-06-01" });
+    assert.equal(res.status, 200, res.body.message);
+  });
+
+  test("korisnik na smeštaju, datum pre otpusta i sestra → odbijeno", async () => {
+    const active = await createPatient();
+    assert.equal((await request(app).patch(`/api/patient/${active._id}/readmit`).set(authHeader(admin)).send({ admissionDate: "2026-06-01" })).status, 409);
+    const out = await createPatient({ admissionDate: utc("2025-06-01"), dischargeDate: utc("2025-08-31") });
+    assert.equal((await request(app).patch(`/api/patient/${out._id}/readmit`).set(authHeader(admin)).send({ admissionDate: "2025-08-31" })).status, 400);
+    assert.equal((await request(app).patch(`/api/patient/${out._id}/readmit`).set(authHeader(nurse)).send({ admissionDate: "2026-06-01" })).status, 403);
+  });
+});
+
 describe("dijagnoze", () => {
   test("nepostojeći pacijent → 404 (ranije pad servera)", async () => {
     const res = await request(app)

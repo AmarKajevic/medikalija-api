@@ -18,6 +18,8 @@ const SCOPES: Record<string, Rule[]> = {
     ["POST", "/api/patient/duplicates/remove"],
     // Otpust korisnika (zatvara aktivnu specifikaciju, kao kod uprave)
     ["PATCH", /^\/api\/patient\/[^/]+\/discharge$/],
+    // Ponovni prijem otpuštenog korisnika (npr. dolazi svako leto)
+    ["PATCH", /^\/api\/patient\/[^/]+\/readmit$/],
     ["*", "/api/social-notes"],
     // Socijalni dosije: lični podaci, procene, individualni plan, rokovi
     ["*", "/api/social"],

@@ -2,6 +2,7 @@
 // popunjavaju iz podataka korisnika. Podatak unet jednom (npr. JMBG, staratelj) pojavljuje se
 // u svakom šablonu koji koristi to polje. Nazivi su bez kvačica da se lako kucaju u Wordu.
 import Patient from "../../models/Patient.js";
+import { currentStayFrom } from "../patientStay.js";
 import SocialProfile from "../../models/SocialProfile.js";
 import SocialDocument from "../../models/SocialDocument.js";
 import SocialNote from "../../models/SocialNote.js";
@@ -201,18 +202,22 @@ function placementText(p: { placementBasis?: string; contractNumber?: string; co
 
 /** Svi podaci korisnika za šablone: polja (tekst) i tabele (nizovi redova). Prazno polje je "". */
 export async function buildMergeData(patientId: string, author?: { name: string; lastName: string } | null) {
+  // Posle ponovnog prijema važe samo dokumenti i beleške tekućeg boravka
+  const stayPatient = await Patient.findById(patientId).select("admissionDate previousStays").lean();
+  const stayFrom = currentStayFrom(stayPatient);
+  const inStay = stayFrom ? { date: { $gte: stayFrom } } : {};
   // Poslednji dokument svake vrste iz obrazaca (zaključen ima prednost, pa najnoviji)
-  const latest = (type: string) => SocialDocument.findOne({ patient: patientId, type }).sort({ status: -1, date: -1, createdAt: -1 }).lean();
+  const latest = (type: string) => SocialDocument.findOne({ patient: patientId, type, ...inStay }).sort({ status: -1, date: -1, createdAt: -1 }).lean();
   const [intakeDoc, anamnesisDoc, assessmentDoc, scaleDoc, planDoc, reviewDoc] = await Promise.all(
     ["intake", "anamnesis", "assessment", "support_scale", "plan", "plan_review"].map(latest)
   );
   const [patient, profile, plan, assessment, notes, settings] = await Promise.all([
     Patient.findById(patientId).lean(),
     SocialProfile.findOne({ patient: patientId }).populate<{ assignedStaff: { name: string; lastName: string } | null }>("assignedStaff", "name lastName").lean(),
-    SocialDocument.findOne({ patient: patientId, type: { $in: ["plan", "plan_review"] }, status: "final" }).sort({ date: -1 }).lean(),
+    SocialDocument.findOne({ patient: patientId, type: { $in: ["plan", "plan_review"] }, status: "final", ...inStay }).sort({ date: -1 }).lean(),
     // Poslednja zaključena procena (ili nacrt, ako zaključene još nema)
-    SocialDocument.findOne({ patient: patientId, type: { $in: ["assessment", "reassessment"] } }).sort({ status: -1, date: -1 }).lean(),
-    SocialNote.find({ patient: patientId }).sort({ date: 1 }).limit(200).lean(),
+    SocialDocument.findOne({ patient: patientId, type: { $in: ["assessment", "reassessment"] }, ...inStay }).sort({ status: -1, date: -1 }).lean(),
+    SocialNote.find({ patient: patientId, ...inStay }).sort({ date: 1 }).limit(200).lean(),
     GlobalSetting.findOne().lean(),
   ]);
   if (!patient) return null;
@@ -375,7 +380,8 @@ export async function buildMergeData(patientId: string, author?: { name: string;
     obveznik_viber: obligor?.viber ?? "",
     placa_smestaj_tekst: p.payerNote || (LABELS.payer![p.payer ?? ""] ?? ""),
     poslovna_sposobnost_tekst: join(LABELS.legal![p.legalCapacity ?? ""], g?.authority, g?.decisionNumber ? `br. ${g.decisionNumber}` : "", fmtDay(g?.decisionDate)),
-    staratelj_tekst: join(g?.name, g?.relation, g?.phone),
+    // Obrazac 4, III.6: "Prezime, ime i adresa staraoca"
+    staratelj_tekst: join(g?.name, g?.address, g?.phone),
     poverenik: trustee?.name ?? "",
     poverenik_adresa: trustee?.address ?? "",
     poverenik_lk: trustee?.idCardNumber ?? "",
@@ -385,7 +391,8 @@ export async function buildMergeData(patientId: string, author?: { name: string;
     stepen: roman(p.supportLevel ?? 0),
     // Stručni dokumenti (obrasci 2, 4, 10–13): datumi i delovi teksta poslednjeg dokumenta
     pp_datum: fmtDay(intakeDoc?.date),
-    an_datum: fmtDay(anamnesisDoc?.date),
+    // Obrazac 4: datum lista iz kartona, inače raniji dokument, inače datum prijema
+    an_datum: fmtDay(p.socialHealth?.date) || fmtDay(anamnesisDoc?.date) || fmtDay(patient.admissionDate),
     pr_datum: fmtDay(assessmentDoc?.date),
     sk_datum: fmtDay(scaleDoc?.date),
     sk_ponovna: fmtDay(scaleDoc?.nextReview),
@@ -393,7 +400,13 @@ export async function buildMergeData(patientId: string, author?: { name: string;
     ip_evaluacija: fmtDay(planDoc?.nextReview),
     pg_datum: fmtDay(reviewDoc?.date),
     ...sectionFields("pp", intakeDoc),
+    // Obrazac 4 (II–V): karton (socijalno-zdravstveni podaci); raniji list kao dokument samo dopunjuje prazno
     ...sectionFields("an", anamnesisDoc),
+    ...Object.fromEntries(
+      Object.entries(p.socialHealth ?? {})
+        .filter(([k, v]) => k !== "date" && typeof v === "string" && v.trim())
+        .map(([k, v]) => [`an_${k}`, String(v)])
+    ),
     ...sectionFields("pr", assessmentDoc),
     ...sectionFields("sk", scaleDoc),
     ...sectionFields("ip", planDoc),
